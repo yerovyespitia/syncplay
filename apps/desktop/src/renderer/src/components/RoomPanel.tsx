@@ -1,19 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import YouTube, { type YouTubeEvent } from "react-youtube";
+import { useState } from "react";
 
-import type { Participant, RoomState } from "@syncplay/shared";
+import type { LocalFileMediaSource, RoomState, TransferState, YoutubeMediaSource } from "@syncplay/shared";
 
-type YoutubePlayerApi = {
-  getCurrentTime(): number | Promise<number>;
-  seekTo(seconds: number, allowSeekAhead: boolean): void;
-  playVideo(): void;
-  pauseVideo(): void;
-};
+import { LocalFileRoomPlayer } from "./LocalFileRoomPlayer";
+import { YouTubeRoomPlayer } from "./YouTubeRoomPlayer";
 
-const PLAYER_STATE_PLAYING = 1;
-const PLAYER_STATE_PAUSED = 2;
-
-type RemoteCommand =
+type RemotePlaybackCommand =
   | {
       kind: "sync";
       room: RoomState;
@@ -28,126 +20,64 @@ type RemoteCommand =
       receivedAt: number;
     };
 
+type PeerSignal =
+  | {
+      type: "peer_offer";
+      roomId: string;
+      sourceParticipantId: string;
+      sdp: RTCSessionDescriptionInit;
+      receivedAt: number;
+    }
+  | {
+      type: "peer_answer";
+      roomId: string;
+      sourceParticipantId: string;
+      sdp: RTCSessionDescriptionInit;
+      receivedAt: number;
+    }
+  | {
+      type: "peer_ice_candidate";
+      roomId: string;
+      sourceParticipantId: string;
+      candidate: RTCIceCandidateInit;
+      receivedAt: number;
+    };
+
 interface RoomPanelProps {
   room: RoomState;
-  participants: Participant[];
+  localFile: File | null;
   selfId: string | null;
-  remoteCommand: RemoteCommand | null;
+  remoteCommand: RemotePlaybackCommand | null;
+  peerSignal: PeerSignal | null;
   lastActionLabel: string;
   onLeave: () => void;
   onRequestSync: () => void;
   onPlay: (currentTime: number) => void;
   onPause: (currentTime: number) => void;
   onSeek: (currentTime: number) => void;
+  onPeerOffer: (targetParticipantId: string, sdp: RTCSessionDescriptionInit) => void;
+  onPeerAnswer: (targetParticipantId: string, sdp: RTCSessionDescriptionInit) => void;
+  onPeerIceCandidate: (targetParticipantId: string, candidate: RTCIceCandidateInit) => void;
+  onTransferState: (transferState: TransferState) => void;
 }
-
-const DRIFT_THRESHOLD_SECONDS = 1.2;
 
 export function RoomPanel({
   room,
-  participants,
+  localFile,
   selfId,
   remoteCommand,
+  peerSignal,
   lastActionLabel,
   onLeave,
   onRequestSync,
   onPlay,
   onPause,
-  onSeek
+  onSeek,
+  onPeerOffer,
+  onPeerAnswer,
+  onPeerIceCandidate,
+  onTransferState
 }: RoomPanelProps) {
-  const playerRef = useRef<YoutubePlayerApi | null>(null);
-  const suppressEventsRef = useRef(false);
-  const isReadyRef = useRef(false);
-  const lastAppliedEventIdRef = useRef(-1);
-
-  const playerOptions = useMemo(() => ({
-    width: "100%",
-    height: "100%",
-    playerVars: {
-      autoplay: 0,
-      rel: 0,
-      modestbranding: 1
-    }
-  }), []);
-
-  useEffect(() => {
-    if (!remoteCommand || !playerRef.current || !isReadyRef.current) {
-      return;
-    }
-
-    if (lastAppliedEventIdRef.current === remoteCommand.room.lastEventId && remoteCommand.kind === "event") {
-      return;
-    }
-
-    if (remoteCommand.kind === "event" && remoteCommand.actorId === selfId) {
-      lastAppliedEventIdRef.current = remoteCommand.room.lastEventId;
-      return;
-    }
-
-    applyAuthoritativeState(playerRef.current, remoteCommand.room);
-    lastAppliedEventIdRef.current = remoteCommand.room.lastEventId;
-  }, [remoteCommand, selfId]);
-
-  useEffect(() => {
-    const interval = window.setInterval(async () => {
-      const player = playerRef.current;
-
-      if (!player || !isReadyRef.current || room.playbackState !== "playing") {
-        return;
-      }
-
-      const expectedTime = room.currentTime + (Date.now() - room.updatedAt) / 1000;
-      const currentTime = await player.getCurrentTime();
-
-      if (Math.abs(expectedTime - currentTime) > DRIFT_THRESHOLD_SECONDS) {
-        applyAuthoritativeState(player, {
-          ...room,
-          currentTime: expectedTime
-        });
-      }
-    }, 2500);
-
-    return () => {
-      window.clearInterval(interval);
-    };
-  }, [room]);
-
-  function handleReady(event: YouTubeEvent<number>) {
-    playerRef.current = event.target;
-    isReadyRef.current = true;
-    applyAuthoritativeState(event.target, room);
-  }
-
-  async function handleStateChange(event: YouTubeEvent<number>) {
-    if (suppressEventsRef.current || !playerRef.current || !isReadyRef.current) {
-      return;
-    }
-
-    const currentTime = await playerRef.current.getCurrentTime();
-
-    if (event.data === PLAYER_STATE_PLAYING) {
-      onPlay(currentTime);
-      return;
-    }
-
-    if (event.data === PLAYER_STATE_PAUSED) {
-      onPause(currentTime);
-    }
-  }
-
-  async function handleManualSync() {
-    const player = playerRef.current;
-
-    if (!player) {
-      onRequestSync();
-      return;
-    }
-
-    const currentTime = await player.getCurrentTime();
-    onSeek(currentTime);
-    onRequestSync();
-  }
-
   const [copied, setCopied] = useState(false);
 
   function handleCopyCode() {
@@ -165,22 +95,19 @@ export function RoomPanel({
           <div className="room-code-row">
             <button className="room-code-button" type="button" onClick={handleCopyCode} title="Copy room code">
               <span>{room.roomId}</span>
-              <span className="room-code-icon">{copied ? "✓" : "⎘"}</span>
+              <span className="room-code-icon">{copied ? "OK" : "CP"}</span>
             </button>
-            {copied && <span className="room-code-copied">Copied!</span>}
+            {copied ? <span className="room-code-copied">Copied!</span> : null}
           </div>
+          <p className="helper-text">
+            Source: {room.mediaSource.type === "youtube" ? "YouTube" : `${room.mediaSource.fileName} (local file)`}
+          </p>
         </div>
         <div className="room-actions">
-          <button className="action-button action-button--sync" onClick={handleManualSync} type="button">
-            <svg width="13" height="13" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M13.65 2.35A8 8 0 1 0 15 8h-2a6 6 0 1 1-1.1-3.5L9 7h6V1l-1.35 1.35Z" fill="currentColor"/>
-            </svg>
+          <button className="action-button action-button--sync" onClick={onRequestSync} type="button">
             Resync
           </button>
           <button className="action-button action-button--leave" onClick={onLeave} type="button">
-            <svg width="13" height="13" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M10 2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h4M13 8H7m3-3 3 3-3 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-            </svg>
             Leave room
           </button>
         </div>
@@ -188,16 +115,32 @@ export function RoomPanel({
 
       <div className="room-grid">
         <div className="player-card">
-          <div className="player-wrapper">
-            <YouTube
-              className="youtube-frame"
-              iframeClassName="youtube-iframe"
-              videoId={room.videoId}
-              opts={playerOptions}
-              onReady={handleReady}
-              onStateChange={handleStateChange}
+          {room.mediaSource.type === "youtube" ? (
+            <YouTubeRoomPlayer
+              room={room as RoomState & { mediaSource: YoutubeMediaSource }}
+              selfId={selfId}
+              remoteCommand={remoteCommand}
+              onPlay={onPlay}
+              onPause={onPause}
             />
-          </div>
+          ) : (
+            <LocalFileRoomPlayer
+              room={room as RoomState & { mediaSource: LocalFileMediaSource }}
+              selfId={selfId}
+              localFile={localFile}
+              remoteCommand={remoteCommand}
+              peerSignal={peerSignal}
+              onPlay={onPlay}
+              onPause={onPause}
+              onSeek={onSeek}
+              onRequestSync={onRequestSync}
+              onPeerOffer={onPeerOffer}
+              onPeerAnswer={onPeerAnswer}
+              onPeerIceCandidate={onPeerIceCandidate}
+              onTransferState={onTransferState}
+            />
+          )}
+
           <div className="player-status">
             <span>{room.playbackState === "playing" ? "Playing" : "Paused"}</span>
             <span>{lastActionLabel}</span>
@@ -208,7 +151,7 @@ export function RoomPanel({
           <div>
             <p className="eyebrow">Participants</p>
             <ul className="participant-list">
-              {participants.map((participant) => (
+              {room.participants.map((participant) => (
                 <li key={participant.id}>
                   <span>{participant.displayName ?? participant.id.slice(0, 6)}</span>
                   {participant.id === selfId ? <strong>You</strong> : null}
@@ -226,29 +169,17 @@ export function RoomPanel({
               <span className="stat-label">Events</span>
               <strong>{room.lastEventId}</strong>
             </div>
+            {room.transferState ? (
+              <div>
+                <span className="stat-label">Transfer</span>
+                <strong>
+                  {room.transferState.phase} {Math.round(room.transferState.progress * 100)}%
+                </strong>
+              </div>
+            ) : null}
           </div>
         </aside>
       </div>
     </section>
   );
-
-  function applyAuthoritativeState(player: YoutubePlayerApi, authoritativeRoom: RoomState) {
-    suppressEventsRef.current = true;
-
-    void Promise.resolve(player.getCurrentTime()).then((currentTime: number) => {
-      if (Math.abs(authoritativeRoom.currentTime - currentTime) > DRIFT_THRESHOLD_SECONDS || authoritativeRoom.playbackState === "paused") {
-        player.seekTo(authoritativeRoom.currentTime, true);
-      }
-
-      if (authoritativeRoom.playbackState === "playing") {
-        player.playVideo();
-      } else {
-        player.pauseVideo();
-      }
-
-      window.setTimeout(() => {
-        suppressEventsRef.current = false;
-      }, 150);
-    });
-  }
 }

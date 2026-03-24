@@ -1,4 +1,4 @@
-import type { ClientEvent, ServerEnvelope } from "@syncplay/shared";
+import type { ClientEvent, ServerEnvelope, TransferState } from "@syncplay/shared";
 import { normalizeRoomId } from "@syncplay/shared";
 
 import { RoomManager } from "./room-manager";
@@ -43,12 +43,7 @@ const server = Bun.serve<SocketData>({
       const parsed = safeParseMessage(message);
 
       if (!parsed) {
-        send(ws, {
-          type: "server_error",
-          payload: {
-            message: "Invalid message payload."
-          }
-        });
+        sendError(ws, "Invalid message payload.");
         return;
       }
 
@@ -62,12 +57,28 @@ const server = Bun.serve<SocketData>({
       }
 
       removeSocketFromRoom(roomId, ws);
-      const room = roomManager.leaveRoom(roomId, ws.data.participantId);
+      const result = roomManager.leaveRoom(roomId, ws.data.participantId);
 
-      if (room) {
-        broadcast(room.roomId, {
+      if (!result) {
+        return;
+      }
+
+      if (result.hostDisconnected) {
+        broadcast(result.room.roomId, {
+          type: "host_disconnected",
+          payload: {
+            roomId: result.room.roomId,
+            message: "The host left the room. Local file playback is no longer available."
+          }
+        });
+        roomMembers.delete(normalizeRoomId(result.room.roomId));
+        return;
+      }
+
+      if (!result.deleted) {
+        broadcast(result.room.roomId, {
           type: "presence_updated",
-          payload: { room }
+          payload: { room: result.room }
         });
       }
     }
@@ -79,13 +90,13 @@ console.log(`SyncPlay server running on http://127.0.0.1:${server.port}`);
 function handleEvent(ws: Bun.ServerWebSocket<SocketData>, event: ClientEvent) {
   switch (event.type) {
     case "create_room": {
-      if (!event.payload.videoId) {
-        sendError(ws, "Missing video id.");
+      if (event.payload.mediaSource.type === "youtube" && !event.payload.mediaSource.videoId) {
+        sendError(ws, "Missing YouTube video id.");
         return;
       }
 
       const participant = buildParticipant(ws.data.participantId, event.payload.displayName);
-      const created = roomManager.createRoom(event.payload.videoId, participant);
+      const created = roomManager.createRoom(event.payload.mediaSource, participant);
       ws.data.roomId = created.room.roomId;
       addSocketToRoom(created.room.roomId, ws);
       send(ws, {
@@ -109,8 +120,8 @@ function handleEvent(ws: Bun.ServerWebSocket<SocketData>, event: ClientEvent) {
       const participant = buildParticipant(ws.data.participantId, event.payload.displayName);
       const joined = roomManager.joinRoom(roomId, participant);
 
-      if (!joined) {
-        sendError(ws, "Room not found.");
+      if (!joined.ok) {
+        sendError(ws, joined.reason);
         return;
       }
 
@@ -159,13 +170,29 @@ function handleEvent(ws: Bun.ServerWebSocket<SocketData>, event: ClientEvent) {
     case "leave_room": {
       const roomId = event.payload.roomId;
       removeSocketFromRoom(roomId, ws);
-      const room = roomManager.leaveRoom(roomId, ws.data.participantId);
+      const result = roomManager.leaveRoom(roomId, ws.data.participantId);
       ws.data.roomId = undefined;
 
-      if (room) {
-        broadcast(room.roomId, {
+      if (!result) {
+        return;
+      }
+
+      if (result.hostDisconnected) {
+        broadcast(result.room.roomId, {
+          type: "host_disconnected",
+          payload: {
+            roomId: result.room.roomId,
+            message: "The host left the room. Local file playback is no longer available."
+          }
+        });
+        roomMembers.delete(normalizeRoomId(result.room.roomId));
+        return;
+      }
+
+      if (!result.deleted) {
+        broadcast(result.room.roomId, {
           type: "presence_updated",
-          payload: { room }
+          payload: { room: result.room }
         });
       }
 
@@ -191,6 +218,60 @@ function handleEvent(ws: Bun.ServerWebSocket<SocketData>, event: ClientEvent) {
         type: "player_state_changed",
         payload: applied
       });
+      return;
+    }
+
+    case "peer_offer":
+    case "peer_answer":
+    case "peer_ice_candidate": {
+      const targetSocket = findRoomSocket(event.payload.roomId, event.payload.targetParticipantId);
+
+      if (!targetSocket) {
+        sendError(ws, "Target participant is not available.");
+        return;
+      }
+
+      send(targetSocket, {
+        type: event.type,
+        payload: {
+          roomId: event.payload.roomId,
+          sourceParticipantId: ws.data.participantId,
+          ...(event.type === "peer_ice_candidate"
+            ? { candidate: event.payload.candidate }
+            : { sdp: event.payload.sdp })
+        }
+      } as ServerEnvelope);
+      return;
+    }
+
+    case "peer_transfer_state": {
+      const transferState = event.payload.transferState as TransferState;
+      const room = roomManager.updateTransferState(event.payload.roomId, transferState);
+
+      if (!room) {
+        sendError(ws, "Room not found.");
+        return;
+      }
+
+      broadcast(room.roomId, {
+        type: "transfer_state_updated",
+        payload: { room }
+      });
+
+      if (transferState.phase === "ready") {
+        broadcast(room.roomId, {
+          type: "local_file_ready",
+          payload: { room }
+        });
+      }
+
+      if (transferState.phase === "buffering") {
+        broadcast(room.roomId, {
+          type: "local_file_buffering",
+          payload: { room }
+        });
+      }
+
       return;
     }
   }
@@ -258,6 +339,22 @@ function removeSocketFromRoom(roomId: string, ws: Bun.ServerWebSocket<SocketData
   }
 }
 
+function findRoomSocket(roomId: string, participantId: string) {
+  const members = roomMembers.get(normalizeRoomId(roomId));
+
+  if (!members) {
+    return null;
+  }
+
+  for (const member of members) {
+    if (member.data.participantId === participantId) {
+      return member;
+    }
+  }
+
+  return null;
+}
+
 const clientEventTypes = new Set<ClientEvent["type"]>([
   "create_room",
   "join_room",
@@ -265,13 +362,17 @@ const clientEventTypes = new Set<ClientEvent["type"]>([
   "player_play",
   "player_pause",
   "player_seek",
-  "leave_room"
+  "leave_room",
+  "peer_offer",
+  "peer_answer",
+  "peer_ice_candidate",
+  "peer_transfer_state"
 ]);
 
 function safeParseMessage(message: string | Buffer): ClientEvent | null {
   try {
     const decoded = typeof message === "string" ? message : Buffer.from(message).toString("utf8");
-    const parsed = JSON.parse(decoded) as { type?: unknown; payload?: unknown };
+    const parsed = JSON.parse(decoded) as { type?: unknown };
 
     if (!parsed || typeof parsed !== "object" || !clientEventTypes.has(parsed.type as ClientEvent["type"])) {
       return null;

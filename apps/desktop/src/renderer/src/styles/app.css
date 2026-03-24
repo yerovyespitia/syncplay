@@ -20,6 +20,13 @@ body {
 button,
 input {
   font: inherit;
+  -webkit-app-region: no-drag;
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
 }
 
 #root {
@@ -31,7 +38,18 @@ input {
 .app-shell {
   max-width: 1360px;
   margin: 0 auto;
-  padding: 28px 32px;
+  padding: 56px 32px 28px;
+}
+
+.window-drag-region {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 56px;
+  z-index: 1000;
+  pointer-events: auto;
+  -webkit-app-region: drag;
 }
 
 /* ── Card base ────────────────────────────────────────── */
@@ -137,6 +155,39 @@ input {
   border-radius: 14px;
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.source-selector {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.source-chip {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  color: #d4d4d8;
+  border-radius: 999px;
+  padding: 8px 14px;
+  cursor: pointer;
+}
+
+.source-chip--active {
+  background: rgba(124, 58, 237, 0.18);
+  border-color: rgba(124, 58, 237, 0.35);
+  color: #ede9fe;
+}
+
+.local-file-picker {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.hidden-file-input {
+  display: none;
 }
 
 .pill {
@@ -422,6 +473,33 @@ input {
 .youtube-iframe {
   width: 100%;
   height: 100%;
+}
+
+.local-player-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.local-player-wrapper {
+  overflow: hidden;
+  border-radius: 12px;
+  aspect-ratio: 16 / 9;
+  background: #000;
+}
+
+.local-video {
+  width: 100%;
+  height: 100%;
+  background: #000;
+}
+
+.local-player-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  color: #a1a1aa;
+  font-size: 0.82rem;
 }
 
 .player-status {

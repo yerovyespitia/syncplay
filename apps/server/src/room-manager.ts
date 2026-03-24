@@ -1,4 +1,12 @@
-import { type PlaybackState, type Participant, type RoomState, createRoomId, normalizeRoomId } from "@syncplay/shared";
+import {
+  type MediaSource,
+  type Participant,
+  type PlaybackState,
+  type RoomState,
+  type TransferState,
+  createRoomId,
+  normalizeRoomId
+} from "@syncplay/shared";
 
 type RoomRecord = {
   state: RoomState;
@@ -8,7 +16,7 @@ type RoomRecord = {
 export class RoomManager {
   private readonly rooms = new Map<string, RoomRecord>();
 
-  createRoom(videoId: string, participant: Participant) {
+  createRoom(mediaSource: MediaSource, participant: Participant) {
     let roomId = createRoomId();
 
     while (this.rooms.has(roomId)) {
@@ -18,12 +26,25 @@ export class RoomManager {
     const now = Date.now();
     const room: RoomState = {
       roomId,
-      videoId,
+      mediaSource,
       playbackState: "paused",
       currentTime: 0,
       updatedAt: now,
       lastEventId: 0,
-      participants: [participant]
+      participants: [participant],
+      hostParticipantId: mediaSource.type === "local_file" ? participant.id : undefined,
+      transferState:
+        mediaSource.type === "local_file"
+          ? {
+              phase: "waiting_host",
+              bytesReceived: 0,
+              bytesTotal: mediaSource.fileSize,
+              bytesPersisted: 0,
+              progress: 0,
+              isPlaybackReady: false,
+              availableRanges: []
+            }
+          : undefined
     };
 
     const record: RoomRecord = {
@@ -42,14 +63,37 @@ export class RoomManager {
     const record = this.rooms.get(normalizeRoomId(roomId));
 
     if (!record) {
-      return null;
+      return {
+        ok: false as const,
+        reason: "Room not found."
+      };
+    }
+
+    if (record.state.mediaSource.type === "local_file" && record.participants.size >= 2) {
+      return {
+        ok: false as const,
+        reason: "Local file rooms support only two participants."
+      };
     }
 
     record.participants.set(participant.id, participant);
     record.state.participants = Array.from(record.participants.values());
     record.state.updatedAt = Date.now();
 
+    if (record.state.mediaSource.type === "local_file") {
+      record.state.transferState = {
+        phase: "connecting_peer",
+        bytesReceived: 0,
+        bytesTotal: record.state.mediaSource.fileSize,
+        bytesPersisted: 0,
+        progress: 0,
+        isPlaybackReady: false,
+        availableRanges: []
+      };
+    }
+
     return {
+      ok: true as const,
       room: record.state
     };
   }
@@ -62,17 +106,27 @@ export class RoomManager {
       return null;
     }
 
+    const wasHost = record.state.hostParticipantId === participantId;
+    const roomBeforeRemoval = record.state;
     record.participants.delete(participantId);
 
-    if (record.participants.size === 0) {
+    if (record.participants.size === 0 || wasHost) {
       this.rooms.delete(normalizedRoomId);
-      return null;
+      return {
+        room: roomBeforeRemoval,
+        deleted: true,
+        hostDisconnected: wasHost && roomBeforeRemoval.mediaSource.type === "local_file"
+      };
     }
 
     record.state.participants = Array.from(record.participants.values());
     record.state.updatedAt = Date.now();
 
-    return record.state;
+    return {
+      room: record.state,
+      deleted: false,
+      hostDisconnected: false
+    };
   }
 
   getRoom(roomId: string) {
@@ -100,7 +154,11 @@ export class RoomManager {
       currentTime: safeCurrentTime,
       updatedAt: Date.now(),
       lastEventId: record.state.lastEventId + 1,
-      participants: Array.from(record.participants.values())
+      participants: Array.from(record.participants.values()),
+      transferState:
+        record.state.transferState && action === "player_play"
+          ? { ...record.state.transferState, phase: "streaming" }
+          : record.state.transferState
     };
 
     this.rooms.set(record.state.roomId, record);
@@ -110,6 +168,23 @@ export class RoomManager {
       actorId,
       action
     };
+  }
+
+  updateTransferState(roomId: string, transferState: TransferState) {
+    const record = this.rooms.get(normalizeRoomId(roomId));
+
+    if (!record) {
+      return null;
+    }
+
+    record.state = {
+      ...record.state,
+      transferState,
+      updatedAt: Date.now(),
+      participants: Array.from(record.participants.values())
+    };
+
+    return record.state;
   }
 }
 
