@@ -1,0 +1,11 @@
+node_modules
+.DS_Store
+dist
+out
+.idea
+.vscode
+coverage
+apps/desktop/out
+apps/desktop/dist
+apps/desktop/dist-electron
+

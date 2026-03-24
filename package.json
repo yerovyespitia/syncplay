@@ -1,0 +1,22 @@
+{
+  "name": "syncplay",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -k \"bun run --filter @syncplay/server dev\" \"bun run --filter @syncplay/desktop dev\"",
+    "dev:server": "bun run --filter @syncplay/server dev",
+    "dev:desktop": "bun run --filter @syncplay/desktop dev",
+    "build": "bun run --filter '*' build",
+    "test": "bun test",
+    "check": "bun run --filter '*' check"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.1",
+    "bun-types": "^1.3.11",
+    "concurrently": "^9.1.2",
+    "typescript": "^5.8.2"
+  }
+}
