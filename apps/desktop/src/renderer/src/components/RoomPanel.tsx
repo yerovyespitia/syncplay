@@ -95,9 +95,8 @@ export function RoomPanel({
           <div className="room-code-row">
             <button className="room-code-button" type="button" onClick={handleCopyCode} title="Copy room code">
               <span>{room.roomId}</span>
-              <span className="room-code-icon">{copied ? "OK" : "CP"}</span>
+              <span className={`room-code-icon ${copied ? "room-code-icon--copied" : ""}`}>{copied ? "OK" : "CP"}</span>
             </button>
-            {copied ? <span className="room-code-copied">Copied!</span> : null}
           </div>
           <p className="helper-text">
             Source: {room.mediaSource.type === "youtube" ? "YouTube" : `${room.mediaSource.fileName} (local file)`}

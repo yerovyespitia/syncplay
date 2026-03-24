@@ -18,6 +18,7 @@ function createWindow() {
     minHeight: 760,
     show: false,
     autoHideMenuBar: true,
+    titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
     backgroundColor: "#09090b",
     webPreferences: {
       preload: path.join(__dirname, "../preload/index.mjs"),
