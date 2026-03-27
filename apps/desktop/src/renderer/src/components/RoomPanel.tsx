@@ -84,6 +84,8 @@ export function RoomPanel({
   onTransferState
 }: RoomPanelProps) {
   const [copied, setCopied] = useState(false);
+  const [showDebugLogs, setShowDebugLogs] = useState(import.meta.env.DEV);
+  const canToggleDebugLogs = import.meta.env.DEV;
 
   function handleCopyCode() {
     navigator.clipboard.writeText(room.roomId).then(() => {
@@ -91,6 +93,20 @@ export function RoomPanel({
       setTimeout(() => setCopied(false), 2000);
     });
   }
+
+  const sourceLabel =
+    room.mediaSource.type === "youtube" ? (
+      <span className="source-badge" aria-label="YouTube source" title="YouTube">
+        <svg className="source-badge__icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path
+            fill="currentColor"
+            d="M23.5 6.2a3 3 0 0 0-2.1-2.1C19.5 3.5 12 3.5 12 3.5s-7.5 0-9.4.6A3 3 0 0 0 .5 6.2 31.7 31.7 0 0 0 0 12a31.7 31.7 0 0 0 .5 5.8 3 3 0 0 0 2.1 2.1c1.9.6 9.4.6 9.4.6s7.5 0 9.4-.6a3 3 0 0 0 2.1-2.1A31.7 31.7 0 0 0 24 12a31.7 31.7 0 0 0-.5-5.8ZM9.6 15.6V8.4l6.2 3.6-6.2 3.6Z"
+          />
+        </svg>
+      </span>
+    ) : (
+      `${room.mediaSource.fileName} (local file)`
+    );
 
   return (
     <section className="room-shell">
@@ -104,10 +120,19 @@ export function RoomPanel({
             </button>
           </div>
           <p className="helper-text">
-            Source: {room.mediaSource.type === "youtube" ? "YouTube" : `${room.mediaSource.fileName} (local file)`}
+            <strong>Source:</strong> {sourceLabel}
           </p>
         </div>
         <div className="room-actions">
+          {canToggleDebugLogs ? (
+            <button
+              className={`action-button ${showDebugLogs ? "action-button--logs-on" : "action-button--logs-off"}`}
+              onClick={() => setShowDebugLogs((current) => !current)}
+              type="button"
+            >
+              Logs {showDebugLogs ? "on" : "off"}
+            </button>
+          ) : null}
           <button className="action-button action-button--sync" onClick={onRequestSync} type="button">
             Resync
           </button>
@@ -184,25 +209,27 @@ export function RoomPanel({
             ) : null}
           </div>
 
-          <div className="debug-panel">
-            <p className="eyebrow">Logs</p>
-            <ul className="debug-list">
-              {debugEntries.length === 0 ? (
-                <li className="debug-empty">No logs yet.</li>
-              ) : (
-                debugEntries.slice(0, 12).map((entry) => (
-                  <li key={entry.id} className="debug-item">
-                    <span className={`debug-scope debug-scope--${entry.scope}`}>{entry.scope}</span>
-                    <div>
-                      <strong>{entry.message}</strong>
-                      <span>{new Date(entry.timestamp).toLocaleTimeString()}</span>
-                      {entry.details ? <code>{entry.details}</code> : null}
-                    </div>
-                  </li>
-                ))
-              )}
-            </ul>
-          </div>
+          {showDebugLogs ? (
+            <div className="debug-panel">
+              <p className="eyebrow">Logs</p>
+              <ul className="debug-list">
+                {debugEntries.length === 0 ? (
+                  <li className="debug-empty">No logs yet.</li>
+                ) : (
+                  debugEntries.slice(0, 12).map((entry) => (
+                    <li key={entry.id} className="debug-item">
+                      <span className={`debug-scope debug-scope--${entry.scope}`}>{entry.scope}</span>
+                      <div>
+                        <strong>{entry.message}</strong>
+                        <span>{new Date(entry.timestamp).toLocaleTimeString()}</span>
+                        {entry.details ? <code>{entry.details}</code> : null}
+                      </div>
+                    </li>
+                  ))
+                )}
+              </ul>
+            </div>
+          ) : null}
         </aside>
       </div>
     </section>

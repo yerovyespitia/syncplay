@@ -22,6 +22,8 @@ function createWindow() {
     backgroundColor: "#09090b",
     webPreferences: {
       preload: path.join(__dirname, "../preload/index.mjs"),
+      // Electron 35 sandboxes renderers by default; our preload is ESM and needs an unsandboxed context.
+      sandbox: false,
       contextIsolation: true,
       nodeIntegration: false,
       autoplayPolicy: "no-user-gesture-required"

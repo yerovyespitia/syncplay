@@ -766,7 +766,13 @@ export function LocalFileRoomPlayer({
     const url = createObjectUrl(bytes, room.mediaSource.mimeType);
     lastBlobSizeRef.current = contiguousBytes;
     setMediaUrl(url);
-    updateLocalMessage(pendingSeekTimeRef.current !== undefined ? `Buffering at ${formatTime(pendingSeekTimeRef.current)}` : "Streaming local file");
+    updateLocalMessage(
+      pendingSeekTimeRef.current !== undefined
+        ? `Buffering at ${formatTime(pendingSeekTimeRef.current)}`
+        : room.playbackState === "playing"
+          ? "Streaming local file"
+          : "Ready to play"
+    );
   }
 
   function requestNextRange(reason: RangeRequestReason) {
@@ -795,6 +801,26 @@ export function LocalFileRoomPlayer({
       endByte
     };
 
+    const effectiveTransferState = lastReportedTransferRef.current ?? room.transferState;
+    const nextPhase =
+      reason === "initial"
+        ? "buffering"
+        : effectiveTransferState?.isPlaybackReady
+          ? room.playbackState === "playing"
+            ? "streaming"
+            : "ready"
+          : effectiveTransferState?.phase ?? "buffering";
+    const nextMessage =
+      reason === "seek" && targetTime !== undefined
+        ? `Buffering at ${formatTime(targetTime)}`
+        : reason === "initial"
+          ? "Preparing playback"
+          : effectiveTransferState?.isPlaybackReady
+            ? room.playbackState === "playing"
+              ? "Streaming local file"
+              : "Ready to play"
+            : effectiveTransferState?.message ?? "Preparing playback";
+
     requestedRangeRef.current = requestRange;
     dataChannelRef.current.send(
       JSON.stringify({
@@ -807,13 +833,8 @@ export function LocalFileRoomPlayer({
     );
 
     publishTransferState(
-      buildTransferState(reason === "initial" ? "buffering" : room.transferState?.phase ?? "buffering", {
-        message:
-          reason === "seek" && targetTime !== undefined
-            ? `Buffering at ${formatTime(targetTime)}`
-            : reason === "initial"
-              ? "Preparing playback"
-              : room.transferState?.message ?? "Ready to play",
+      buildTransferState(nextPhase, {
+        message: nextMessage,
         pendingSeekTime: targetTime,
         lastRequestedRange: requestRange
       })
@@ -838,7 +859,9 @@ export function LocalFileRoomPlayer({
       return true;
     }
 
-    if (!room.transferState?.isPlaybackReady) {
+    const effectiveTransferState = lastReportedTransferRef.current ?? room.transferState;
+
+    if (!effectiveTransferState?.isPlaybackReady) {
       return true;
     }
 
@@ -1079,6 +1102,7 @@ export function LocalFileRoomPlayer({
     const bytesPersisted = overrides.bytesPersisted ?? contiguousBytesRef.current;
     const bytesTotal = room.mediaSource.fileSize;
     const bufferedUntilTime = overrides.bufferedUntilTime ?? calculateBufferedUntilTime(contiguousBytesRef.current);
+    const effectiveTransferState = lastReportedTransferRef.current ?? room.transferState;
 
     return {
       phase,
@@ -1087,7 +1111,7 @@ export function LocalFileRoomPlayer({
       bytesPersisted,
       progress: bytesTotal > 0 ? bytesPersisted / bytesTotal : 0,
       bufferedUntilTime,
-      isPlaybackReady: overrides.isPlaybackReady ?? room.transferState?.isPlaybackReady ?? false,
+      isPlaybackReady: overrides.isPlaybackReady ?? effectiveTransferState?.isPlaybackReady ?? false,
       pendingSeekTime: overrides.pendingSeekTime ?? pendingSeekTimeRef.current,
       reconnectAttempt: overrides.reconnectAttempt ?? (reconnectAttemptRef.current || undefined),
       lastRequestedRange: overrides.lastRequestedRange ?? requestedRangeRef.current ?? undefined,

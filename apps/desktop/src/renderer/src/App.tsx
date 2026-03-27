@@ -8,19 +8,10 @@ import { useRoomConnection } from "./hooks/useRoomConnection";
 
 type SourceOption = "youtube" | "local_file";
 
-function detectPlatformLabel() {
-  const navigatorWithUserAgentData = navigator as Navigator & {
-    userAgentData?: {
-      platform?: string;
-    };
-  };
-  const candidate =
-    navigatorWithUserAgentData.userAgentData?.platform ||
-    navigator.platform ||
-    (typeof navigator.userAgent === "string" ? navigator.userAgent : "");
-  const normalized = candidate.toLowerCase();
+function formatPlatformLabel(value: string) {
+  const normalized = value.toLowerCase();
 
-  if (normalized.includes("mac")) {
+  if (normalized.includes("mac") || normalized.includes("darwin")) {
     return "macOS";
   }
 
@@ -33,6 +24,20 @@ function detectPlatformLabel() {
   }
 
   return "web";
+}
+
+function detectPlatformLabel() {
+  const navigatorWithUserAgentData = navigator as Navigator & {
+    userAgentData?: {
+      platform?: string;
+    };
+  };
+  const candidate =
+    navigatorWithUserAgentData.userAgentData?.platform ||
+    navigator.platform ||
+    (typeof navigator.userAgent === "string" ? navigator.userAgent : "");
+
+  return formatPlatformLabel(candidate);
 }
 
 function detectElectronVersion() {
@@ -55,7 +60,7 @@ const fallbackDesktopApi: DesktopApi = {
 export default function App() {
   const desktopApi = window.syncplayDesktop ?? fallbackDesktopApi;
   const hasDesktopBridge = Boolean(window.syncplayDesktop);
-  const platformLabel = desktopApi.platform || detectPlatformLabel();
+  const platformLabel = formatPlatformLabel(desktopApi.platform || detectPlatformLabel());
   const electronVersionLabel = desktopApi.electronVersion || detectElectronVersion();
   const [sourceOption, setSourceOption] = useState<SourceOption>("youtube");
   const [videoUrl, setVideoUrl] = useState("");
@@ -174,13 +179,20 @@ export default function App() {
               <span className="pill pill-info">Electron {electronVersionLabel}</span>
               {hasDesktopBridge ? (
                 <button
-                  className="secondary-button"
+                  className="desktop-icon-button"
                   type="button"
+                  aria-label="Open desktop window"
+                  title="Open desktop window"
                   onClick={() => {
                     void desktopApi.openDesktopWindow();
                   }}
                 >
-                  Open desktop window
+                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                    <path
+                      fill="currentColor"
+                      d="M4 6.5A2.5 2.5 0 0 1 6.5 4h7A2.5 2.5 0 0 1 16 6.5v1h1.5A2.5 2.5 0 0 1 20 10v7.5A2.5 2.5 0 0 1 17.5 20h-7A2.5 2.5 0 0 1 8 17.5v-1H6.5A2.5 2.5 0 0 1 4 14V6.5Zm2.5-1a1 1 0 0 0-1 1V14a1 1 0 0 0 1 1H8V10A2.5 2.5 0 0 1 10.5 7.5h4V6.5a1 1 0 0 0-1-1h-7Zm4 3.5a1 1 0 0 0-1 1v7.5a1 1 0 0 0 1 1h7a1 1 0 0 0 1-1V10a1 1 0 0 0-1-1h-7Z"
+                    />
+                  </svg>
                 </button>
               ) : null}
             </div>
