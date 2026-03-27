@@ -46,6 +46,7 @@ interface LocalFileRoomPlayerProps {
   localFile: File | null;
   remoteCommand: RemotePlaybackCommand | null;
   peerSignal: PeerSignal | null;
+  onDebug?: (entry: { scope: "local"; message: string; details?: string }) => void;
   onPlay: (currentTime: number) => void;
   onPause: (currentTime: number) => void;
   onSeek: (currentTime: number) => void;
@@ -128,6 +129,7 @@ export function LocalFileRoomPlayer({
   localFile,
   remoteCommand,
   peerSignal,
+  onDebug,
   onPlay,
   onPause,
   onSeek,
@@ -166,6 +168,15 @@ export function LocalFileRoomPlayer({
   const [localMessage, setLocalMessage] = useState("Waiting for peer connection");
   const debugRole = isHost ? "host" : "guest";
   const desktopApi = window.syncplayDesktop ?? fallbackDesktopApi;
+
+  function reportLocalDebug(message: string, details?: Record<string, unknown>) {
+    debugLog(debugRole, message, details);
+    onDebug?.({
+      scope: "local",
+      message,
+      details: details ? JSON.stringify(details) : undefined
+    });
+  }
 
   const remoteParticipantId = useMemo(
     () => room.participants.find((participant) => participant.id !== selfId)?.id ?? null,
@@ -320,7 +331,7 @@ export function LocalFileRoomPlayer({
   }
 
   async function createHostPeer(targetParticipantId: string) {
-    debugLog(debugRole, "createHostPeer", { targetParticipantId });
+    reportLocalDebug("createHostPeer", { targetParticipantId });
     cleanupPeer(false);
     const peer = buildPeerConnection(targetParticipantId);
     activePeerIdRef.current = targetParticipantId;
@@ -340,7 +351,7 @@ export function LocalFileRoomPlayer({
   }
 
   async function createGuestPeer(sourceParticipantId: string) {
-    debugLog(debugRole, "createGuestPeer", { sourceParticipantId });
+    reportLocalDebug("createGuestPeer", { sourceParticipantId });
     cleanupPeer(false);
     const peer = buildPeerConnection(sourceParticipantId);
     peer.ondatachannel = (event) => {
@@ -359,10 +370,10 @@ export function LocalFileRoomPlayer({
 
   function buildPeerConnection(targetParticipantId: string) {
     const peer = new RTCPeerConnection({ iceServers: ICE_SERVERS });
-    debugLog(debugRole, "peer connection created", { targetParticipantId });
+    reportLocalDebug("peer connection created", { targetParticipantId });
     peer.onicecandidate = (event) => {
       if (event.candidate) {
-        debugLog(debugRole, "peer ice candidate", {
+        reportLocalDebug("peer ice candidate", {
           targetParticipantId,
           candidateType: event.candidate.type ?? "unknown"
         });
@@ -370,7 +381,7 @@ export function LocalFileRoomPlayer({
       }
     };
     peer.onconnectionstatechange = () => {
-      debugLog(debugRole, "peer connection state", {
+      reportLocalDebug("peer connection state", {
         targetParticipantId,
         state: peer.connectionState
       });
@@ -391,13 +402,13 @@ export function LocalFileRoomPlayer({
   }
 
   function attachDataChannel(targetParticipantId: string, channel: RTCDataChannel) {
-    debugLog(debugRole, "attachDataChannel", {
+    reportLocalDebug("attachDataChannel", {
       targetParticipantId,
       label: channel.label,
       readyState: channel.readyState
     });
     channel.onopen = () => {
-      debugLog(debugRole, "data channel open", { targetParticipantId });
+      reportLocalDebug("data channel open", { targetParticipantId });
       if (isHost) {
         updateLocalMessage("Connected to peer");
         return;
@@ -417,52 +428,87 @@ export function LocalFileRoomPlayer({
     };
 
     channel.onerror = () => {
-      debugLog(debugRole, "data channel error", {
+      reportLocalDebug("data channel error", {
         targetParticipantId
       });
       handlePeerDisconnect(targetParticipantId);
     };
 
     channel.onclose = () => {
-      debugLog(debugRole, "data channel close", {
+      reportLocalDebug("data channel close", {
         targetParticipantId
       });
     };
   }
 
   async function handlePeerSignal(signal: PeerSignal) {
-    debugLog(debugRole, "handlePeerSignal", {
+    reportLocalDebug("handlePeerSignal", {
       type: signal.type,
       sourceParticipantId: signal.sourceParticipantId
     });
 
-    if (signal.type === "peer_offer") {
-      const peer = peerRef.current ?? (await createGuestPeer(signal.sourceParticipantId));
-      await peer.setRemoteDescription(new RTCSessionDescription(signal.sdp));
-      await flushPendingIceCandidates(peer);
-      const answer = await peer.createAnswer();
-      await peer.setLocalDescription(answer);
-      onPeerAnswer(signal.sourceParticipantId, answer);
-      return;
-    }
+    try {
+      if (signal.type === "peer_offer") {
+        const shouldCreateNewPeer =
+          !peerRef.current || (activePeerIdRef.current !== null && activePeerIdRef.current !== signal.sourceParticipantId);
+        const peer = shouldCreateNewPeer ? await createGuestPeer(signal.sourceParticipantId) : peerRef.current;
 
-    if (signal.type === "peer_answer") {
-      if (!peerRef.current) {
+        if (!peer) {
+          return;
+        }
+
+        await peer.setRemoteDescription(signal.sdp);
+        await flushPendingIceCandidates(peer);
+        const answer = await peer.createAnswer();
+        await peer.setLocalDescription(answer);
+        reportLocalDebug("peer answer created", {
+          sourceParticipantId: signal.sourceParticipantId
+        });
+        onPeerAnswer(signal.sourceParticipantId, answer);
         return;
       }
 
-      await peerRef.current.setRemoteDescription(new RTCSessionDescription(signal.sdp));
-      await flushPendingIceCandidates(peerRef.current);
-      return;
-    }
+      if (signal.type === "peer_answer") {
+        if (!peerRef.current) {
+          return;
+        }
 
-    if (signal.type === "peer_ice_candidate") {
-      if (!peerRef.current || !peerRef.current.remoteDescription) {
-        pendingIceCandidatesRef.current.push(signal.candidate);
+        await peerRef.current.setRemoteDescription(signal.sdp);
+        await flushPendingIceCandidates(peerRef.current);
+        reportLocalDebug("peer answer applied", {
+          sourceParticipantId: signal.sourceParticipantId
+        });
         return;
       }
 
-      await peerRef.current.addIceCandidate(new RTCIceCandidate(signal.candidate));
+      if (signal.type === "peer_ice_candidate") {
+        if (!peerRef.current || !peerRef.current.remoteDescription) {
+          pendingIceCandidatesRef.current.push(signal.candidate);
+          reportLocalDebug("peer ice candidate queued", {
+            sourceParticipantId: signal.sourceParticipantId
+          });
+          return;
+        }
+
+        await peerRef.current.addIceCandidate(signal.candidate);
+        reportLocalDebug("peer ice candidate applied", {
+          sourceParticipantId: signal.sourceParticipantId
+        });
+      }
+    } catch (error) {
+      const errorDetails = {
+        type: signal.type,
+        sourceParticipantId: signal.sourceParticipantId,
+        error: formatError(error)
+      };
+      reportLocalDebug("peer signal failed", errorDetails);
+      updateLocalMessage("Peer negotiation failed");
+      publishTransferState(
+        buildTransferState("failed", {
+          message: "Peer negotiation failed"
+        }),
+        true
+      );
     }
   }
 
@@ -472,7 +518,7 @@ export function LocalFileRoomPlayer({
     }
 
     reconnectAttemptRef.current += 1;
-    debugLog(debugRole, "peer disconnect", {
+    reportLocalDebug("peer disconnect", {
       targetParticipantId,
       reconnectAttempt: reconnectAttemptRef.current
     });
@@ -655,10 +701,13 @@ export function LocalFileRoomPlayer({
       return;
     }
 
-    const bufferedUntilTime = calculateBufferedUntilTime(contiguousBytesRef.current);
-    const readyByBytes = contiguousBytesRef.current >= MIN_INITIAL_BUFFER_BYTES;
-    const readyByTime = bufferedUntilTime !== undefined && bufferedUntilTime >= MIN_INITIAL_BUFFER_SECONDS;
-    const isReady = readyByBytes || readyByTime;
+    const video = videoRef.current;
+    const playableBufferedUntil = getPlayableBufferedUntil(video);
+    const hasPlayableFrame = hasCurrentPlayableData(video);
+    const isReady =
+      hasPlayableFrame &&
+      playableBufferedUntil !== undefined &&
+      playableBufferedUntil >= Math.max(MIN_INITIAL_BUFFER_SECONDS, room.currentTime + SEEK_RESUME_PADDING_SECONDS);
 
     if (!isReady) {
       return;
@@ -667,7 +716,7 @@ export function LocalFileRoomPlayer({
     updateLocalMessage("Ready to play");
     publishTransferState(
       buildTransferState("ready", {
-        bufferedUntilTime,
+        bufferedUntilTime: playableBufferedUntil,
         isPlaybackReady: true,
         message: "Ready to play"
       })
@@ -677,7 +726,7 @@ export function LocalFileRoomPlayer({
       dataChannelRef.current.send(
         JSON.stringify({
           type: "buffer-ready",
-          bufferedUntilTime
+          bufferedUntilTime: playableBufferedUntil
         } satisfies PeerControlMessage)
       );
     }
@@ -690,15 +739,15 @@ export function LocalFileRoomPlayer({
       return;
     }
 
-    const bufferedUntilTime = calculateBufferedUntilTime(contiguousBytesRef.current);
-
-    if (bufferedUntilTime === undefined || bufferedUntilTime < pendingSeekTime + SEEK_RESUME_PADDING_SECONDS) {
-      return;
-    }
-
     const video = videoRef.current;
 
     if (!video) {
+      return;
+    }
+
+    const bufferedUntilTime = getPlayableBufferedUntil(video);
+
+    if (bufferedUntilTime === undefined || bufferedUntilTime < pendingSeekTime + SEEK_RESUME_PADDING_SECONDS) {
       return;
     }
 
@@ -742,7 +791,7 @@ export function LocalFileRoomPlayer({
 
     if (!force && contiguousBytes - lastBlobSizeRef.current < BLOB_REFRESH_STEP_BYTES) {
       const video = videoRef.current;
-      const currentBlobBufferedUntil = calculateBufferedUntilTime(lastBlobSizeRef.current);
+      const currentBlobBufferedUntil = getPlayableBufferedUntil(video) ?? calculateBufferedUntilTime(lastBlobSizeRef.current);
 
       if (
         mediaUrl &&
@@ -880,7 +929,7 @@ export function LocalFileRoomPlayer({
       return;
     }
 
-    const bufferedUntilTime = isHost ? Number.POSITIVE_INFINITY : calculateBufferedUntilTime(contiguousBytesRef.current);
+    const bufferedUntilTime = isHost ? Number.POSITIVE_INFINITY : getPlayableBufferedUntil(video);
 
     if (bufferedUntilTime !== undefined && video.currentTime >= bufferedUntilTime - 0.25) {
       debugLog(debugRole, "handlePlay requesting more buffer", {
@@ -932,7 +981,7 @@ export function LocalFileRoomPlayer({
       return;
     }
 
-    const bufferedUntilTime = calculateBufferedUntilTime(contiguousBytesRef.current);
+    const bufferedUntilTime = getPlayableBufferedUntil(video);
 
     if (bufferedUntilTime !== undefined && video.currentTime <= bufferedUntilTime - SEEK_RESUME_PADDING_SECONDS) {
       onSeek(video.currentTime);
@@ -963,32 +1012,7 @@ export function LocalFileRoomPlayer({
       durationRef.current = video.duration;
     }
 
-    if (!pendingPlaybackRestoreRef.current) {
-      return;
-    }
-
-    video.currentTime = pendingPlaybackRestoreRef.current.time;
-
-    if (pendingPlaybackRestoreRef.current.shouldPlay) {
-      void video
-        .play()
-        .then(() => {
-          debugLog(debugRole, "play after metadata restore resolved", {
-            currentTime: video.currentTime
-          });
-        })
-        .catch((error: unknown) => {
-          debugLog(debugRole, "play after metadata restore rejected", {
-            error: formatError(error)
-          });
-        });
-    }
-
-    window.setTimeout(() => {
-      suppressEventsRef.current = false;
-    }, 150);
-
-    pendingPlaybackRestoreRef.current = null;
+    restorePendingPlayback(video, "loadedmetadata");
   }
 
   return (
@@ -1007,6 +1031,11 @@ export function LocalFileRoomPlayer({
               readyState: video?.readyState,
               currentTime: video?.currentTime
             });
+            if (video) {
+              maybePromotePlaybackReady();
+              maybeResumePendingSeek();
+              restorePendingPlayback(video, "loadeddata");
+            }
           }}
           onCanPlay={() => {
             const video = videoRef.current;
@@ -1014,6 +1043,11 @@ export function LocalFileRoomPlayer({
               readyState: video?.readyState,
               currentTime: video?.currentTime
             });
+            if (video) {
+              maybePromotePlaybackReady();
+              maybeResumePendingSeek();
+              restorePendingPlayback(video, "canplay");
+            }
           }}
           onError={() => {
             const video = videoRef.current;
@@ -1056,12 +1090,21 @@ export function LocalFileRoomPlayer({
       lastEventId: authoritativeRoom.lastEventId
     });
 
-    if (Math.abs(video.currentTime - authoritativeRoom.currentTime) > DRIFT_THRESHOLD_SECONDS) {
+    const playableBufferedUntil = isHost ? Number.POSITIVE_INFINITY : getPlayableBufferedUntil(video);
+
+    if (
+      !isHost &&
+      playableBufferedUntil !== undefined &&
+      authoritativeRoom.currentTime > playableBufferedUntil - 0.25
+    ) {
+      pendingSeekTimeRef.current = authoritativeRoom.currentTime;
+      requestNextRange("seek");
+    } else if (Math.abs(video.currentTime - authoritativeRoom.currentTime) > DRIFT_THRESHOLD_SECONDS) {
       video.currentTime = authoritativeRoom.currentTime;
     }
 
     if (authoritativeRoom.playbackState === "playing") {
-      const bufferedUntilTime = isHost ? Number.POSITIVE_INFINITY : calculateBufferedUntilTime(contiguousBytesRef.current);
+      const bufferedUntilTime = isHost ? Number.POSITIVE_INFINITY : getPlayableBufferedUntil(video);
 
       if (bufferedUntilTime !== undefined && authoritativeRoom.currentTime > bufferedUntilTime - 0.25) {
         pendingSeekTimeRef.current = authoritativeRoom.currentTime;
@@ -1087,6 +1130,63 @@ export function LocalFileRoomPlayer({
     window.setTimeout(() => {
       suppressEventsRef.current = false;
     }, 150);
+  }
+
+  function restorePendingPlayback(video: HTMLVideoElement, trigger: "loadedmetadata" | "loadeddata" | "canplay") {
+    const pendingPlaybackRestore = pendingPlaybackRestoreRef.current;
+
+    if (!pendingPlaybackRestore) {
+      return;
+    }
+
+    const playableBufferedUntil = isHost ? Number.POSITIVE_INFINITY : getPlayableBufferedUntil(video);
+    const canRestoreAtTarget =
+      pendingPlaybackRestore.time <= 0.25 ||
+      playableBufferedUntil === undefined ||
+      pendingPlaybackRestore.time <= playableBufferedUntil - 0.25;
+
+    if (!canRestoreAtTarget) {
+      debugLog(debugRole, "restorePendingPlayback waiting for more data", {
+        trigger,
+        targetTime: pendingPlaybackRestore.time,
+        playableBufferedUntil
+      });
+      pendingSeekTimeRef.current = pendingPlaybackRestore.time;
+      requestNextRange("seek");
+      return;
+    }
+
+    debugLog(debugRole, "restorePendingPlayback applying", {
+      trigger,
+      targetTime: pendingPlaybackRestore.time,
+      shouldPlay: pendingPlaybackRestore.shouldPlay,
+      playableBufferedUntil
+    });
+
+    video.currentTime = pendingPlaybackRestore.time;
+
+    if (pendingPlaybackRestore.shouldPlay) {
+      void video
+        .play()
+        .then(() => {
+          debugLog(debugRole, "play after restore resolved", {
+            trigger,
+            currentTime: video.currentTime
+          });
+        })
+        .catch((error: unknown) => {
+          debugLog(debugRole, "play after restore rejected", {
+            trigger,
+            error: formatError(error)
+          });
+        });
+    }
+
+    window.setTimeout(() => {
+      suppressEventsRef.current = false;
+    }, 150);
+
+    pendingPlaybackRestoreRef.current = null;
   }
 
   function calculateBufferedUntilTime(contiguousBytes: number) {
@@ -1292,6 +1392,57 @@ function formatTime(totalSeconds: number) {
     .padStart(2, "0");
   const seconds = (safeSeconds % 60).toString().padStart(2, "0");
   return `${minutes}:${seconds}`;
+}
+
+function getPlayableBufferedUntil(video: HTMLVideoElement | null) {
+  const mediaBufferedUntil = getMediaBufferedEnd(video);
+
+  if (mediaBufferedUntil !== undefined) {
+    return mediaBufferedUntil;
+  }
+
+  return calculateBufferedTimeFromFile(video);
+}
+
+function hasCurrentPlayableData(video: HTMLVideoElement | null) {
+  if (!video) {
+    return false;
+  }
+
+  return video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && getPlayableBufferedUntil(video) !== undefined;
+}
+
+function getMediaBufferedEnd(video: HTMLVideoElement | null) {
+  if (!video || video.buffered.length === 0) {
+    return undefined;
+  }
+
+  try {
+    return video.buffered.end(video.buffered.length - 1);
+  } catch {
+    return undefined;
+  }
+}
+
+function calculateBufferedTimeFromFile(video: HTMLVideoElement | null) {
+  if (!video || !Number.isFinite(video.duration) || video.duration <= 0) {
+    return undefined;
+  }
+
+  for (let index = 0; index < video.seekable.length; index += 1) {
+    try {
+      const start = video.seekable.start(index);
+      const end = video.seekable.end(index);
+
+      if (video.currentTime >= start && video.currentTime <= end) {
+        return end;
+      }
+    } catch {
+      return undefined;
+    }
+  }
+
+  return undefined;
 }
 
 function yieldToUi() {

@@ -1,0 +1,28 @@
+<svg width="160" height="160" viewBox="0 0 160 160" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="orbit" x1="22" y1="28" x2="134" y2="138" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#7c3aed" />
+      <stop offset="0.52" stop-color="#8b5cf6" />
+      <stop offset="1" stop-color="#22c55e" />
+    </linearGradient>
+    <linearGradient id="core" x1="50" y1="42" x2="106" y2="114" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#faf5ff" stop-opacity="0.96" />
+      <stop offset="1" stop-color="#ddd6fe" stop-opacity="0.86" />
+    </linearGradient>
+    <radialGradient id="glow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(80 80) rotate(90) scale(58)">
+      <stop offset="0" stop-color="#8b5cf6" stop-opacity="0.26" />
+      <stop offset="1" stop-color="#8b5cf6" stop-opacity="0" />
+    </radialGradient>
+  </defs>
+
+  <rect width="160" height="160" rx="40" fill="#0f0f13" />
+  <rect x="8" y="8" width="144" height="144" rx="32" fill="url(#glow)" />
+
+  <path d="M42 48C49 40 61 34 76 34c16 0 31 6 42 18 5 5 10 12 13 19" stroke="url(#orbit)" stroke-width="12" stroke-linecap="round" />
+  <path d="M118 112c-8 9-21 14-36 14-16 0-31-6-42-18-5-5-10-12-13-19" stroke="url(#orbit)" stroke-width="12" stroke-linecap="round" />
+
+  <circle cx="126" cy="70" r="7" fill="#22c55e" />
+  <circle cx="34" cy="90" r="7" fill="#7c3aed" />
+
+  <path d="M70 61.5v37l30-18.5-30-18.5Z" fill="url(#core)" />
+</svg>

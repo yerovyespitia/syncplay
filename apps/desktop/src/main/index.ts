@@ -7,6 +7,7 @@ import path from "node:path";
 const rendererUrl = process.env.ELECTRON_RENDERER_URL;
 const localFiles = new Map<string, string>();
 const tempMediaCaches = new Map<string, string>();
+const isDevMode = !app.isPackaged || Boolean(rendererUrl);
 
 app.commandLine.appendSwitch("autoplay-policy", "no-user-gesture-required");
 
@@ -68,6 +69,10 @@ app.whenReady().then(() => {
   electronApp.setAppUserModelId("com.syncplay.desktop");
 
   ipcMain.handle("syncplay:open-desktop-window", async () => {
+    if (!isDevMode) {
+      return;
+    }
+
     createWindow();
   });
 

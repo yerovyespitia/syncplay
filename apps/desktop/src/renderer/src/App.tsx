@@ -4,6 +4,7 @@ import type { DesktopApi, PickedLocalFile } from "@syncplay/shared";
 import { parseYouTubeUrl } from "@syncplay/shared";
 
 import { RoomPanel } from "./components/RoomPanel";
+import { SyncPlayLogo } from "./components/SyncPlayLogo";
 import { useRoomConnection } from "./hooks/useRoomConnection";
 
 type SourceOption = "youtube" | "local_file";
@@ -59,6 +60,7 @@ const fallbackDesktopApi: DesktopApi = {
 
 export default function App() {
   const desktopApi = window.syncplayDesktop ?? fallbackDesktopApi;
+  const isDev = import.meta.env.DEV;
   const hasDesktopBridge = Boolean(window.syncplayDesktop);
   const platformLabel = formatPlatformLabel(desktopApi.platform || detectPlatformLabel());
   const electronVersionLabel = desktopApi.electronVersion || detectElectronVersion();
@@ -172,12 +174,18 @@ export default function App() {
       {!room ? (
         <>
           <header className="top-bar">
-            <span className="eyebrow top-bar-brand">SyncPlay Desktop</span>
+            <div className="top-bar-brand">
+              <SyncPlayLogo className="top-bar-brand__logo" />
+              <div className="top-bar-brand__copy">
+                <span className="eyebrow">SyncPlay</span>
+                <strong>Desktop</strong>
+              </div>
+            </div>
             <div className="hero-meta">
               <span className={`pill pill-${connectionStatus}`}>{connectionStatus}</span>
               <span className="pill pill-info">{platformLabel}</span>
               <span className="pill pill-info">Electron {electronVersionLabel}</span>
-              {hasDesktopBridge ? (
+              {hasDesktopBridge && isDev ? (
                 <button
                   className="desktop-icon-button"
                   type="button"

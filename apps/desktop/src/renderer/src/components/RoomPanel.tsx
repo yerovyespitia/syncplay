@@ -84,6 +84,7 @@ export function RoomPanel({
   onTransferState
 }: RoomPanelProps) {
   const [copied, setCopied] = useState(false);
+  const [logsCopied, setLogsCopied] = useState(false);
   const [showDebugLogs, setShowDebugLogs] = useState(import.meta.env.DEV);
   const canToggleDebugLogs = import.meta.env.DEV;
 
@@ -91,6 +92,26 @@ export function RoomPanel({
     navigator.clipboard.writeText(room.roomId).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
+    });
+  }
+
+  function handleCopyLogs() {
+    const logText =
+      debugEntries.length === 0
+        ? "No logs yet."
+        : debugEntries
+            .slice()
+            .reverse()
+            .map((entry) =>
+              [entry.scope, entry.message, new Date(entry.timestamp).toLocaleTimeString(), entry.details]
+                .filter(Boolean)
+                .join("\n")
+            )
+            .join("\n\n");
+
+    navigator.clipboard.writeText(logText).then(() => {
+      setLogsCopied(true);
+      setTimeout(() => setLogsCopied(false), 2000);
     });
   }
 
@@ -160,6 +181,7 @@ export function RoomPanel({
               localFile={localFile}
               remoteCommand={remoteCommand}
               peerSignal={peerSignal}
+              onDebug={onDebug}
               onPlay={onPlay}
               onPause={onPause}
               onSeek={onSeek}
@@ -211,7 +233,32 @@ export function RoomPanel({
 
           {showDebugLogs ? (
             <div className="debug-panel">
-              <p className="eyebrow">Logs</p>
+              <div className="debug-panel-header">
+                <p className="eyebrow">Logs</p>
+                <button
+                  className={`action-button action-button--icon ${logsCopied ? "action-button--logs-on" : "action-button--logs-off"}`}
+                  onClick={handleCopyLogs}
+                  type="button"
+                  title={logsCopied ? "Logs copied" : "Copy logs"}
+                  aria-label={logsCopied ? "Logs copied" : "Copy logs"}
+                >
+                  {logsCopied ? (
+                    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                      <path
+                        fill="currentColor"
+                        d="M9.55 18.2 4.8 13.45l1.4-1.4 3.35 3.35 8.25-8.25 1.4 1.4-9.65 9.65Z"
+                      />
+                    </svg>
+                  ) : (
+                    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                      <path
+                        fill="currentColor"
+                        d="M16 1H6a2 2 0 0 0-2 2v12h2V3h10V1Zm3 4H10a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2Zm0 16H10V7h9v14Z"
+                      />
+                    </svg>
+                  )}
+                </button>
+              </div>
               <ul className="debug-list">
                 {debugEntries.length === 0 ? (
                   <li className="debug-empty">No logs yet.</li>
