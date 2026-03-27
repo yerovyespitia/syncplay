@@ -68,7 +68,7 @@ const server = Bun.serve<SocketData>({
           type: "host_disconnected",
           payload: {
             roomId: result.room.roomId,
-            message: "The host left the room. Local file playback is no longer available."
+            message: "The host left the room."
           }
         });
         roomMembers.delete(normalizeRoomId(result.room.roomId));
@@ -182,7 +182,7 @@ function handleEvent(ws: Bun.ServerWebSocket<SocketData>, event: ClientEvent) {
           type: "host_disconnected",
           payload: {
             roomId: result.room.roomId,
-            message: "The host left the room. Local file playback is no longer available."
+            message: "The host left the room."
           }
         });
         roomMembers.delete(normalizeRoomId(result.room.roomId));

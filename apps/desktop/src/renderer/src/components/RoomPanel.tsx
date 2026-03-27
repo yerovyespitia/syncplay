@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import type { LocalFileMediaSource, RoomState, TransferState, YoutubeMediaSource } from "@syncplay/shared";
 
+import type { DebugEntry } from "../hooks/useRoomConnection";
 import { LocalFileRoomPlayer } from "./LocalFileRoomPlayer";
 import { YouTubeRoomPlayer } from "./YouTubeRoomPlayer";
 
@@ -48,6 +49,7 @@ interface RoomPanelProps {
   localFile: File | null;
   selfId: string | null;
   remoteCommand: RemotePlaybackCommand | null;
+  debugEntries: DebugEntry[];
   peerSignal: PeerSignal | null;
   lastActionLabel: string;
   onLeave: () => void;
@@ -55,6 +57,7 @@ interface RoomPanelProps {
   onPlay: (currentTime: number) => void;
   onPause: (currentTime: number) => void;
   onSeek: (currentTime: number) => void;
+  onDebug: (entry: Omit<DebugEntry, "id" | "timestamp">) => void;
   onPeerOffer: (targetParticipantId: string, sdp: RTCSessionDescriptionInit) => void;
   onPeerAnswer: (targetParticipantId: string, sdp: RTCSessionDescriptionInit) => void;
   onPeerIceCandidate: (targetParticipantId: string, candidate: RTCIceCandidateInit) => void;
@@ -66,6 +69,7 @@ export function RoomPanel({
   localFile,
   selfId,
   remoteCommand,
+  debugEntries,
   peerSignal,
   lastActionLabel,
   onLeave,
@@ -73,6 +77,7 @@ export function RoomPanel({
   onPlay,
   onPause,
   onSeek,
+  onDebug,
   onPeerOffer,
   onPeerAnswer,
   onPeerIceCandidate,
@@ -121,6 +126,7 @@ export function RoomPanel({
               remoteCommand={remoteCommand}
               onPlay={onPlay}
               onPause={onPause}
+              onDebug={onDebug}
             />
           ) : (
             <LocalFileRoomPlayer
@@ -176,6 +182,26 @@ export function RoomPanel({
                 </strong>
               </div>
             ) : null}
+          </div>
+
+          <div className="debug-panel">
+            <p className="eyebrow">Logs</p>
+            <ul className="debug-list">
+              {debugEntries.length === 0 ? (
+                <li className="debug-empty">No logs yet.</li>
+              ) : (
+                debugEntries.slice(0, 12).map((entry) => (
+                  <li key={entry.id} className="debug-item">
+                    <span className={`debug-scope debug-scope--${entry.scope}`}>{entry.scope}</span>
+                    <div>
+                      <strong>{entry.message}</strong>
+                      <span>{new Date(entry.timestamp).toLocaleTimeString()}</span>
+                      {entry.details ? <code>{entry.details}</code> : null}
+                    </div>
+                  </li>
+                ))
+              )}
+            </ul>
           </div>
         </aside>
       </div>

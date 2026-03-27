@@ -32,7 +32,7 @@ export class RoomManager {
       updatedAt: now,
       lastEventId: 0,
       participants: [participant],
-      hostParticipantId: mediaSource.type === "local_file" ? participant.id : undefined,
+      hostParticipantId: participant.id,
       transferState:
         mediaSource.type === "local_file"
           ? {
@@ -115,7 +115,7 @@ export class RoomManager {
       return {
         room: roomBeforeRemoval,
         deleted: true,
-        hostDisconnected: wasHost && roomBeforeRemoval.mediaSource.type === "local_file"
+        hostDisconnected: wasHost
       };
     }
 

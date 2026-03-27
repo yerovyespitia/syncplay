@@ -3,8 +3,12 @@ import YouTube, { type YouTubeEvent } from "react-youtube";
 
 import type { RoomState, YoutubeMediaSource } from "@syncplay/shared";
 
+import type { DebugEntry } from "../hooks/useRoomConnection";
+
 type YoutubePlayerApi = {
   getCurrentTime(): number | Promise<number>;
+  getPlayerState?(): number;
+  cueVideoById?(options: { videoId: string; startSeconds?: number }): void;
   seekTo(seconds: number, allowSeekAhead: boolean): void;
   playVideo(): void;
   pauseVideo(): void;
@@ -31,17 +35,22 @@ interface YouTubeRoomPlayerProps {
   remoteCommand: RemotePlaybackCommand | null;
   onPlay: (currentTime: number) => void;
   onPause: (currentTime: number) => void;
+  onDebug: (entry: Omit<DebugEntry, "id" | "timestamp">) => void;
 }
 
 const PLAYER_STATE_PLAYING = 1;
 const PLAYER_STATE_PAUSED = 2;
+const PLAYER_STATE_BUFFERING = 3;
+const PLAYER_STATE_CUED = 5;
+const PLAYER_STATE_UNSTARTED = -1;
 const DRIFT_THRESHOLD_SECONDS = 1.2;
 
-export function YouTubeRoomPlayer({ room, selfId, remoteCommand, onPlay, onPause }: YouTubeRoomPlayerProps) {
+export function YouTubeRoomPlayer({ room, selfId, remoteCommand, onPlay, onPause, onDebug }: YouTubeRoomPlayerProps) {
   const playerRef = useRef<YoutubePlayerApi | null>(null);
   const suppressEventsRef = useRef(false);
   const isReadyRef = useRef(false);
   const lastAppliedEventIdRef = useRef(-1);
+  const lastVideoIdRef = useRef<string | null>(null);
 
   const playerOptions = useMemo(
     () => ({
@@ -49,6 +58,8 @@ export function YouTubeRoomPlayer({ room, selfId, remoteCommand, onPlay, onPause
       height: "100%",
       playerVars: {
         autoplay: 0,
+        controls: 1,
+        disablekb: 0,
         rel: 0,
         modestbranding: 1
       }
@@ -70,9 +81,18 @@ export function YouTubeRoomPlayer({ room, selfId, remoteCommand, onPlay, onPause
       return;
     }
 
+    onDebug({
+      scope: "youtube",
+      message: `apply remote ${remoteCommand.kind}`,
+      details: JSON.stringify({
+        playbackState: remoteCommand.room.playbackState,
+        currentTime: remoteCommand.room.currentTime,
+        lastEventId: remoteCommand.room.lastEventId
+      })
+    });
     applyAuthoritativeState(playerRef.current, remoteCommand.room);
     lastAppliedEventIdRef.current = remoteCommand.room.lastEventId;
-  }, [remoteCommand, selfId, room.mediaSource.type]);
+  }, [onDebug, remoteCommand, selfId, room.mediaSource.type]);
 
   useEffect(() => {
     const interval = window.setInterval(async () => {
@@ -101,7 +121,16 @@ export function YouTubeRoomPlayer({ room, selfId, remoteCommand, onPlay, onPause
   function handleReady(event: YouTubeEvent<number>) {
     playerRef.current = event.target;
     isReadyRef.current = true;
-    applyAuthoritativeState(event.target, room);
+    lastVideoIdRef.current = room.mediaSource.videoId;
+    cueVideo(event.target, room.mediaSource.videoId, room.currentTime);
+    onDebug({
+      scope: "youtube",
+      message: "player ready",
+      details: room.mediaSource.videoId
+    });
+    window.setTimeout(() => {
+      applyAuthoritativeState(event.target, room);
+    }, 0);
   }
 
   async function handleStateChange(event: YouTubeEvent<number>) {
@@ -110,6 +139,15 @@ export function YouTubeRoomPlayer({ room, selfId, remoteCommand, onPlay, onPause
     }
 
     const currentTime = await playerRef.current.getCurrentTime();
+    onDebug({
+      scope: "youtube",
+      message: `state ${String(event.data)}`,
+      details: `t=${currentTime.toFixed(2)}`
+    });
+
+    if (event.data === PLAYER_STATE_BUFFERING || event.data === PLAYER_STATE_CUED) {
+      return;
+    }
 
     if (event.data === PLAYER_STATE_PLAYING) {
       onPlay(currentTime);
@@ -121,6 +159,14 @@ export function YouTubeRoomPlayer({ room, selfId, remoteCommand, onPlay, onPause
     }
   }
 
+  function handleError(event: YouTubeEvent<number>) {
+    onDebug({
+      scope: "youtube",
+      message: `player error ${String(event.data)}`,
+      details: room.mediaSource.videoId
+    });
+  }
+
   return (
     <div className="player-wrapper">
       <YouTube
@@ -130,30 +176,74 @@ export function YouTubeRoomPlayer({ room, selfId, remoteCommand, onPlay, onPause
         opts={playerOptions}
         onReady={handleReady}
         onStateChange={handleStateChange}
+        onError={handleError}
       />
     </div>
   );
 
   function applyAuthoritativeState(player: YoutubePlayerApi, authoritativeRoom: RoomState) {
+    const playerState = player.getPlayerState?.() ?? null;
+
+    onDebug({
+      scope: "youtube",
+      message: "apply authoritative state",
+      details: JSON.stringify({
+        playbackState: authoritativeRoom.playbackState,
+        currentTime: authoritativeRoom.currentTime,
+        playerState
+      })
+    });
     suppressEventsRef.current = true;
 
     void Promise.resolve(player.getCurrentTime()).then((currentTime: number) => {
-      if (
-        Math.abs(authoritativeRoom.currentTime - currentTime) > DRIFT_THRESHOLD_SECONDS ||
-        authoritativeRoom.playbackState === "paused"
-      ) {
+      if (lastVideoIdRef.current !== room.mediaSource.videoId) {
+        lastVideoIdRef.current = room.mediaSource.videoId;
+        cueVideo(player, room.mediaSource.videoId, authoritativeRoom.currentTime);
+      }
+
+      if (Math.abs(authoritativeRoom.currentTime - currentTime) > DRIFT_THRESHOLD_SECONDS) {
         player.seekTo(authoritativeRoom.currentTime, true);
       }
 
       if (authoritativeRoom.playbackState === "playing") {
         player.playVideo();
       } else {
-        player.pauseVideo();
+        const isStablePreviewState =
+          playerState === PLAYER_STATE_CUED || playerState === PLAYER_STATE_UNSTARTED || playerState === null;
+        const isAligned = Math.abs(authoritativeRoom.currentTime - currentTime) <= DRIFT_THRESHOLD_SECONDS;
+
+        if (!isStablePreviewState || !isAligned) {
+          player.pauseVideo();
+        } else {
+          onDebug({
+            scope: "youtube",
+            message: "skip pause on stable preview",
+            details: JSON.stringify({
+              currentTime,
+              playerState
+            })
+          });
+        }
       }
 
       window.setTimeout(() => {
         suppressEventsRef.current = false;
-      }, 150);
+      }, 500);
+    });
+  }
+
+  function cueVideo(player: YoutubePlayerApi, videoId: string, startSeconds: number) {
+    player.cueVideoById?.({
+      videoId,
+      startSeconds
+    });
+    onDebug({
+      scope: "youtube",
+      message: "cue video",
+      details: JSON.stringify({
+        videoId,
+        startSeconds
+      })
     });
   }
 }

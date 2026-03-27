@@ -72,7 +72,9 @@ export default function App() {
     error,
     selfId,
     displayName,
+    debugEntries,
     setDisplayName,
+    pushDebugEntry,
     lastActionLabel,
     createRoom,
     joinRoom,
@@ -86,6 +88,9 @@ export default function App() {
     sendPause,
     sendSeek
   } = useRoomConnection();
+  const shouldShowDesktopBridgeWarning =
+    !hasDesktopBridge &&
+    (sourceOption === "local_file" || (room !== null && room.mediaSource.type === "local_file"));
 
   const parsedVideo = useMemo(() => parseYouTubeUrl(videoUrl), [videoUrl]);
   const canCreateRoom = sourceOption === "youtube" ? Boolean(parsedVideo) : Boolean(selectedLocalFile && selectedBrowserFile);
@@ -161,23 +166,12 @@ export default function App() {
       <div className="window-drag-region" aria-hidden="true" />
       {!room ? (
         <>
-          <section className="hero-card">
-            <div className="hero-copy">
-              <p className="eyebrow">SyncPlay Desktop</p>
-              <h1>Watch together from YouTube or a local file.</h1>
-              <p className="hero-text">
-                Keep playback in sync with room codes, and choose whether the session starts from a YouTube link or a
-                host-shared local video file.
-              </p>
-            </div>
-
-            <div className="hero-side">
-              <div className="hero-meta">
-                <span className={`pill pill-${connectionStatus}`}>{connectionStatus}</span>
-                <span className="pill pill-info">{platformLabel}</span>
-                <span className="pill pill-info">Electron {electronVersionLabel}</span>
-              </div>
-
+          <header className="top-bar">
+            <span className="eyebrow top-bar-brand">SyncPlay Desktop</span>
+            <div className="hero-meta">
+              <span className={`pill pill-${connectionStatus}`}>{connectionStatus}</span>
+              <span className="pill pill-info">{platformLabel}</span>
+              <span className="pill pill-info">Electron {electronVersionLabel}</span>
               {hasDesktopBridge ? (
                 <button
                   className="secondary-button"
@@ -189,26 +183,34 @@ export default function App() {
                   Open desktop window
                 </button>
               ) : null}
+            </div>
+          </header>
 
-              <div className="alias-card">
-                <label className="input-label" htmlFor="display-name">
-                  Your alias
-                </label>
-                <input
-                  id="display-name"
-                  className="text-input"
-                  value={displayName}
-                  onChange={(event) => setDisplayName(event.target.value)}
-                  placeholder="Guest 1234"
-                  maxLength={32}
-                />
-                <p className="helper-text">This name appears in the participant list when you join a room.</p>
-              </div>
+          <section className="hero-section">
+            <div className="hero-copy">
+              <h1>Watch together from YouTube or a local file.</h1>
+              <p className="hero-text">
+                Keep playback in sync with room codes, and choose whether the session starts from a YouTube link or a
+                host-shared local video file.
+              </p>
+            </div>
+            <div className="hero-alias">
+              <label className="input-label" htmlFor="display-name">
+                Your alias
+              </label>
+              <input
+                id="display-name"
+                className="text-input"
+                value={displayName}
+                onChange={(event) => setDisplayName(event.target.value)}
+                placeholder="Guest 1234"
+                maxLength={32}
+              />
             </div>
           </section>
 
-          <section className="lobby-grid">
-            <article className="panel-card">
+          <section className="lobby-section">
+            <div className="lobby-col">
               <p className="eyebrow">Create Room</p>
               <h2>Choose your media source</h2>
 
@@ -276,9 +278,9 @@ export default function App() {
               <button className="primary-button" type="button" onClick={handleCreateRoom} disabled={!canCreateRoom}>
                 Create sync room
               </button>
-            </article>
+            </div>
 
-            <article className="panel-card">
+            <div className="lobby-col lobby-col--join">
               <p className="eyebrow">Join Room</p>
               <h2>Enter a shared room code</h2>
               <label className="input-label" htmlFor="room-code">
@@ -296,7 +298,7 @@ export default function App() {
               <button className="secondary-button" type="button" onClick={handleJoinRoom} disabled={!canJoinRoom}>
                 Join room
               </button>
-            </article>
+            </div>
           </section>
         </>
       ) : (
@@ -305,6 +307,7 @@ export default function App() {
           localFile={selectedBrowserFile}
           selfId={selfId}
           remoteCommand={remoteCommand}
+          debugEntries={debugEntries}
           peerSignal={peerSignal}
           lastActionLabel={lastActionLabel}
           onLeave={leaveRoom}
@@ -312,6 +315,7 @@ export default function App() {
           onPlay={sendPlay}
           onPause={sendPause}
           onSeek={sendSeek}
+          onDebug={pushDebugEntry}
           onPeerOffer={sendPeerOffer}
           onPeerAnswer={sendPeerAnswer}
           onPeerIceCandidate={sendPeerIceCandidate}
@@ -325,7 +329,7 @@ export default function App() {
         </section>
       ) : null}
 
-      {!hasDesktopBridge ? (
+      {shouldShowDesktopBridgeWarning ? (
         <section className="error-banner">
           <strong>Desktop bridge missing:</strong> this window cannot use local-file rooms correctly. Open the app from
           Electron, or use the in-app desktop-window button from a working desktop window.

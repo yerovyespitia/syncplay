@@ -33,6 +33,7 @@ describe("RoomManager", () => {
     const created = manager.createRoom(youtubeSource, participantA);
     const joined = manager.joinRoom(created.room.roomId, participantB);
 
+    expect(created.room.hostParticipantId).toBe(participantA.id);
     expect(joined.ok).toBeTrue();
     if (joined.ok) {
       expect(joined.room.participants).toHaveLength(2);
@@ -56,6 +57,18 @@ describe("RoomManager", () => {
 
     manager.leaveRoom(created.room.roomId, participantA.id);
 
+    expect(manager.getRoom(created.room.roomId)).toBeNull();
+  });
+
+  test("deletes youtube rooms when the host leaves", () => {
+    const manager = new RoomManager();
+    const created = manager.createRoom(youtubeSource, participantA);
+    manager.joinRoom(created.room.roomId, participantB);
+
+    const left = manager.leaveRoom(created.room.roomId, participantA.id);
+
+    expect(left?.deleted).toBeTrue();
+    expect(left?.hostDisconnected).toBeTrue();
     expect(manager.getRoom(created.room.roomId)).toBeNull();
   });
 

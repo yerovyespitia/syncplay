@@ -14,6 +14,14 @@ import { getWebSocketUrl } from "../lib/config";
 
 type ConnectionStatus = "connecting" | "connected" | "disconnected";
 
+export interface DebugEntry {
+  id: string;
+  scope: "socket" | "server" | "client" | "youtube" | "local";
+  message: string;
+  timestamp: number;
+  details?: string;
+}
+
 type RemotePlaybackCommand =
   | {
       kind: "sync";
@@ -73,9 +81,20 @@ export function useRoomConnection() {
   const [selfId, setSelfId] = useState<string | null>(null);
   const [lastActionLabel, setLastActionLabel] = useState("Ready");
   const [displayName, setDisplayNameState] = useState(buildGuestName);
+  const [debugEntries, setDebugEntries] = useState<DebugEntry[]>([]);
   const socketRef = useRef<WebSocket | null>(null);
   const pendingMessagesRef = useRef<ClientEnvelope[]>([]);
   const displayNameRef = useRef(displayName);
+
+  const pushDebugEntry = useCallback((entry: Omit<DebugEntry, "id" | "timestamp">) => {
+    const nextEntry: DebugEntry = {
+      id: crypto.randomUUID(),
+      timestamp: Date.now(),
+      ...entry
+    };
+
+    setDebugEntries((current) => [nextEntry, ...current].slice(0, 40));
+  }, []);
 
   const setDisplayName = useCallback((value: string) => {
     const trimmedValue = value.slice(0, 32);
@@ -85,6 +104,12 @@ export function useRoomConnection() {
   }, []);
 
   const handleServerEvent = useCallback((event: ServerEvent) => {
+    pushDebugEntry({
+      scope: "server",
+      message: event.type,
+      details: JSON.stringify(event.payload)
+    });
+
     switch (event.type) {
       case "room_created":
       case "room_joined":
@@ -152,7 +177,7 @@ export function useRoomConnection() {
         setError(event.payload.message);
         return;
     }
-  }, []);
+  }, [pushDebugEntry]);
 
   const connect = useCallback(() => {
     const existing = socketRef.current;
@@ -162,11 +187,20 @@ export function useRoomConnection() {
     }
 
     setConnectionStatus("connecting");
+    pushDebugEntry({
+      scope: "socket",
+      message: "connecting",
+      details: getWebSocketUrl()
+    });
     const socket = new WebSocket(getWebSocketUrl());
 
     socket.addEventListener("open", () => {
       setConnectionStatus("connected");
       setError(null);
+      pushDebugEntry({
+        scope: "socket",
+        message: "open"
+      });
 
       for (const message of pendingMessagesRef.current) {
         socket.send(JSON.stringify(message));
@@ -177,6 +211,17 @@ export function useRoomConnection() {
 
     socket.addEventListener("close", () => {
       setConnectionStatus("disconnected");
+      pushDebugEntry({
+        scope: "socket",
+        message: "close"
+      });
+    });
+
+    socket.addEventListener("error", () => {
+      pushDebugEntry({
+        scope: "socket",
+        message: "error"
+      });
     });
 
     socket.addEventListener("message", (event) => {
@@ -185,7 +230,7 @@ export function useRoomConnection() {
 
     socketRef.current = socket;
     return socket;
-  }, [handleServerEvent]);
+  }, [handleServerEvent, pushDebugEntry]);
 
   useEffect(() => {
     const socket = connect();
@@ -198,6 +243,11 @@ export function useRoomConnection() {
   const send = useCallback(
     (message: ClientEnvelope) => {
       const socket = connect();
+      pushDebugEntry({
+        scope: "client",
+        message: message.type,
+        details: JSON.stringify(message.payload)
+      });
 
       if (socket.readyState === WebSocket.OPEN) {
         socket.send(JSON.stringify(message));
@@ -206,7 +256,7 @@ export function useRoomConnection() {
 
       pendingMessagesRef.current.push(message);
     },
-    [connect]
+    [connect, pushDebugEntry]
   );
 
   const createRoom = useCallback(
@@ -363,7 +413,9 @@ export function useRoomConnection() {
     error,
     selfId,
     displayName,
+    debugEntries,
     setDisplayName,
+    pushDebugEntry,
     lastActionLabel,
     createRoom,
     joinRoom,
