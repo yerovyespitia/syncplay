@@ -44,6 +44,7 @@ interface LocalFileRoomPlayerProps {
   room: RoomState & { mediaSource: LocalFileMediaSource };
   selfId: string | null;
   localFile: File | null;
+  isTheaterMode: boolean;
   remoteCommand: RemotePlaybackCommand | null;
   peerSignal: PeerSignal | null;
   onDebug?: (entry: { scope: "local"; message: string; details?: string }) => void;
@@ -54,6 +55,7 @@ interface LocalFileRoomPlayerProps {
   onPeerOffer: (targetParticipantId: string, sdp: RTCSessionDescriptionInit) => void;
   onPeerAnswer: (targetParticipantId: string, sdp: RTCSessionDescriptionInit) => void;
   onPeerIceCandidate: (targetParticipantId: string, candidate: RTCIceCandidateInit) => void;
+  onTheaterModeChange: (isTheaterMode: boolean) => void;
   onTransferState: (transferState: TransferState) => void;
 }
 
@@ -71,6 +73,7 @@ const DRIFT_THRESHOLD_SECONDS = 1.2;
 const DATA_CHANNEL_HIGH_WATER_MARK = 4 * 1024 * 1024;
 const DATA_CHANNEL_LOW_WATER_MARK = 512 * 1024;
 const ICE_SERVERS: RTCIceServer[] = [{ urls: "stun:stun.l.google.com:19302" }];
+const CONTROLS_IDLE_DELAY_MS = 3000;
 
 type PeerControlMessage =
   | {
@@ -123,10 +126,76 @@ const fallbackDesktopApi = {
   removeTempMediaCache: async () => undefined
 };
 
+function formatMediaTitle(fileName: string) {
+  const withoutExtension = fileName.replace(/\.[^/.]+$/, "");
+  return withoutExtension.replace(/[_-]+/g, " ").trim() || fileName;
+}
+
+function PlayIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path fill="currentColor" d="M8 6.2v11.6c0 .63.7 1.01 1.23.67l9.18-5.8a.8.8 0 0 0 0-1.34L9.23 5.53A.8.8 0 0 0 8 6.2Z" />
+    </svg>
+  );
+}
+
+function PauseIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path fill="currentColor" d="M7 5.5A1.5 1.5 0 0 1 8.5 4h1A1.5 1.5 0 0 1 11 5.5v13A1.5 1.5 0 0 1 9.5 20h-1A1.5 1.5 0 0 1 7 18.5v-13Zm6 0A1.5 1.5 0 0 1 14.5 4h1A1.5 1.5 0 0 1 17 5.5v13a1.5 1.5 0 0 1-1.5 1.5h-1A1.5 1.5 0 0 1 13 18.5v-13Z" />
+    </svg>
+  );
+}
+
+function VolumeHighIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path
+        fill="currentColor"
+        d="M4 10.5A1.5 1.5 0 0 1 5.5 9H8l4.47-3.58A1 1 0 0 1 14 6.2v11.6a1 1 0 0 1-1.53.78L8 15H5.5A1.5 1.5 0 0 1 4 13.5v-3Zm13.34-2.74a.75.75 0 0 1 1.06-.05 6 6 0 0 1 0 8.58.75.75 0 1 1-1.1-1.02 4.5 4.5 0 0 0 0-6.54.75.75 0 0 1 .04-1.07Zm-2.42 1.92a.75.75 0 0 1 1.06.06 3 3 0 0 1 0 4.52.75.75 0 1 1-1.12-1 1.5 1.5 0 0 0 0-2.52.75.75 0 0 1 .06-1.06Z"
+      />
+    </svg>
+  );
+}
+
+function VolumeMutedIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path
+        fill="currentColor"
+        d="M4 10.5A1.5 1.5 0 0 1 5.5 9H8l4.47-3.58A1 1 0 0 1 14 6.2v11.6a1 1 0 0 1-1.53.78L8 15H5.5A1.5 1.5 0 0 1 4 13.5v-3Zm11.03-.97a.75.75 0 0 1 1.06 0L18 11.44l1.91-1.9a.75.75 0 1 1 1.06 1.06l-1.9 1.9 1.9 1.91a.75.75 0 1 1-1.06 1.06L18 13.56l-1.9 1.91a.75.75 0 1 1-1.07-1.06l1.91-1.9-1.91-1.91a.75.75 0 0 1 0-1.06Z"
+      />
+    </svg>
+  );
+}
+
+function ExpandIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path
+        fill="currentColor"
+        d="M6.75 4A2.75 2.75 0 0 0 4 6.75v2.5a.75.75 0 0 0 1.5 0v-2.5c0-.69.56-1.25 1.25-1.25h2.5a.75.75 0 0 0 0-1.5h-2.5Zm8 0a.75.75 0 0 0 0 1.5h2.5c.69 0 1.25.56 1.25 1.25v2.5a.75.75 0 0 0 1.5 0v-2.5A2.75 2.75 0 0 0 17.25 4h-2.5Zm4.5 10a.75.75 0 0 0-.75.75v2.5c0 .69-.56 1.25-1.25 1.25h-2.5a.75.75 0 0 0 0 1.5h2.5A2.75 2.75 0 0 0 20 17.25v-2.5a.75.75 0 0 0-.75-.75Zm-14.5 0a.75.75 0 0 0-.75.75v2.5A2.75 2.75 0 0 0 6.75 20h2.5a.75.75 0 0 0 0-1.5h-2.5c-.69 0-1.25-.56-1.25-1.25v-2.5a.75.75 0 0 0-.75-.75Z"
+      />
+    </svg>
+  );
+}
+
+function TheaterIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path
+        fill="currentColor"
+        d="M5.75 5A2.75 2.75 0 0 0 3 7.75v8.5A2.75 2.75 0 0 0 5.75 19h12.5A2.75 2.75 0 0 0 21 16.25v-8.5A2.75 2.75 0 0 0 18.25 5H5.75Zm0 1.5h12.5c.69 0 1.25.56 1.25 1.25v1.75H4.5V7.75c0-.69.56-1.25 1.25-1.25Zm-1.25 4.5H10v6.5H5.75c-.69 0-1.25-.56-1.25-1.25V11Zm7 0h8v5.25c0 .69-.56 1.25-1.25 1.25H11.5V11Z"
+      />
+    </svg>
+  );
+}
+
 export function LocalFileRoomPlayer({
   room,
   selfId,
   localFile,
+  isTheaterMode,
   remoteCommand,
   peerSignal,
   onDebug,
@@ -137,6 +206,7 @@ export function LocalFileRoomPlayer({
   onPeerOffer,
   onPeerAnswer,
   onPeerIceCandidate,
+  onTheaterModeChange,
   onTransferState
 }: LocalFileRoomPlayerProps) {
   const isHost = room.hostParticipantId === selfId;
@@ -164,10 +234,23 @@ export function LocalFileRoomPlayer({
   const suppressDisconnectRef = useRef(false);
   const lastReportedTransferRef = useRef<TransferState | null>(null);
   const localMessageRef = useRef("Waiting for peer connection");
+  const controlsHideTimeoutRef = useRef<number | null>(null);
   const [mediaUrl, setMediaUrl] = useState<string | null>(null);
   const [localMessage, setLocalMessage] = useState("Waiting for peer connection");
+  const [isFullscreenMode, setIsFullscreenMode] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(room.playbackState === "playing");
+  const [isMuted, setIsMuted] = useState(false);
+  const [volume, setVolume] = useState(1);
+  const [currentTime, setCurrentTime] = useState(room.currentTime);
+  const [duration, setDuration] = useState(room.mediaSource.duration ?? 0);
+  const [isPointerActive, setIsPointerActive] = useState(true);
   const debugRole = isHost ? "host" : "guest";
   const desktopApi = window.syncplayDesktop ?? fallbackDesktopApi;
+  const mediaTitle = useMemo(() => formatMediaTitle(room.mediaSource.fileName), [room.mediaSource.fileName]);
+  const subtitleLabel = `${isHost ? "Host" : "Guest"} • Local file`;
+  const safeDuration = Math.max(duration, 0);
+  const progressPercent = safeDuration > 0 ? Math.min(100, (currentTime / safeDuration) * 100) : 0;
+  const volumePercent = Math.min(100, Math.max(0, (isMuted ? 0 : volume) * 100));
 
   function reportLocalDebug(message: string, details?: Record<string, unknown>) {
     debugLog(debugRole, message, details);
@@ -192,11 +275,52 @@ export function LocalFileRoomPlayer({
 
   useEffect(() => {
     return () => {
+      if (controlsHideTimeoutRef.current !== null) {
+        window.clearTimeout(controlsHideTimeoutRef.current);
+      }
       cleanupPeer();
       revokeObjectUrl();
       void clearTempCache();
     };
   }, []);
+
+  useEffect(() => {
+    const wrapper = videoRef.current?.closest(".local-player-wrapper");
+
+    function handleFullscreenChange() {
+      setIsFullscreenMode(document.fullscreenElement === wrapper);
+    }
+
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    return () => {
+      document.removeEventListener("fullscreenchange", handleFullscreenChange);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!mediaUrl) {
+      setIsPointerActive(true);
+      return;
+    }
+
+    if (!isPlaying) {
+      setIsPointerActive(true);
+      if (controlsHideTimeoutRef.current !== null) {
+        window.clearTimeout(controlsHideTimeoutRef.current);
+        controlsHideTimeoutRef.current = null;
+      }
+      return;
+    }
+
+    scheduleControlsHide();
+
+    return () => {
+      if (controlsHideTimeoutRef.current !== null) {
+        window.clearTimeout(controlsHideTimeoutRef.current);
+        controlsHideTimeoutRef.current = null;
+      }
+    };
+  }, [isPlaying, mediaUrl]);
 
   useEffect(() => {
     if (isHost) {
@@ -942,6 +1066,7 @@ export function LocalFileRoomPlayer({
       return;
     }
 
+    setIsPlaying(true);
     debugLog(debugRole, "handlePlay forwarding play", {
       currentTime: video.currentTime
     });
@@ -960,6 +1085,7 @@ export function LocalFileRoomPlayer({
       return;
     }
 
+    setIsPlaying(false);
     debugLog(debugRole, "handlePause forwarding pause", {
       currentTime: video.currentTime
     });
@@ -1012,16 +1138,140 @@ export function LocalFileRoomPlayer({
       durationRef.current = video.duration;
     }
 
+    if (Number.isFinite(video.duration) && video.duration > 0) {
+      setDuration(video.duration);
+    }
+
     restorePendingPlayback(video, "loadedmetadata");
   }
 
+  function handleTimeUpdate() {
+    const video = videoRef.current;
+
+    if (!video) {
+      return;
+    }
+
+    setCurrentTime(video.currentTime);
+
+    if (Number.isFinite(video.duration) && video.duration > 0) {
+      setDuration(video.duration);
+    }
+  }
+
+  function handleVolumeChange() {
+    const video = videoRef.current;
+
+    if (!video) {
+      return;
+    }
+
+    setIsMuted(video.muted);
+    setVolume(video.volume);
+  }
+
+  function scheduleControlsHide() {
+    if (controlsHideTimeoutRef.current !== null) {
+      window.clearTimeout(controlsHideTimeoutRef.current);
+    }
+
+    controlsHideTimeoutRef.current = window.setTimeout(() => {
+      setIsPointerActive(false);
+      controlsHideTimeoutRef.current = null;
+    }, CONTROLS_IDLE_DELAY_MS);
+  }
+
+  function revealControls() {
+    setIsPointerActive(true);
+
+    if (!isPlaying || !mediaUrl) {
+      if (controlsHideTimeoutRef.current !== null) {
+        window.clearTimeout(controlsHideTimeoutRef.current);
+        controlsHideTimeoutRef.current = null;
+      }
+      return;
+    }
+
+    scheduleControlsHide();
+  }
+
+  function togglePlayback() {
+    const video = videoRef.current;
+
+    if (!video || !mediaUrl) {
+      return;
+    }
+
+    if (video.paused) {
+      void video.play();
+      return;
+    }
+
+    video.pause();
+  }
+
+  function handleTimelineInput(event: React.ChangeEvent<HTMLInputElement>) {
+    const video = videoRef.current;
+
+    if (!video) {
+      return;
+    }
+
+    const nextTime = Number(event.target.value);
+    video.currentTime = nextTime;
+    setCurrentTime(nextTime);
+  }
+
+  function handleVolumeInput(event: React.ChangeEvent<HTMLInputElement>) {
+    const video = videoRef.current;
+
+    if (!video) {
+      return;
+    }
+
+    const nextVolume = Number(event.target.value);
+    video.volume = nextVolume;
+    video.muted = nextVolume === 0;
+    setVolume(nextVolume);
+    setIsMuted(video.muted);
+  }
+
+  function toggleMute() {
+    const video = videoRef.current;
+
+    if (!video) {
+      return;
+    }
+
+    video.muted = !video.muted;
+    setIsMuted(video.muted);
+  }
+
+  async function toggleFullscreen() {
+    const wrapper = videoRef.current?.closest(".local-player-wrapper");
+
+    if (!wrapper) {
+      return;
+    }
+
+    if (document.fullscreenElement === wrapper) {
+      await document.exitFullscreen();
+      return;
+    }
+
+    await wrapper.requestFullscreen();
+  }
+
   return (
-    <div className="local-player-shell">
-      <div className="local-player-wrapper">
+    <div className={`local-player-shell ${isTheaterMode ? "local-player-shell--theater" : ""}`}>
+      <div
+        className={`local-player-wrapper ${isFullscreenMode ? "local-player-wrapper--fullscreen" : ""}`}
+        onMouseMove={revealControls}
+        onMouseEnter={revealControls}
+      >
         <video
           ref={videoRef}
           className="local-video"
-          controls
           playsInline
           src={mediaUrl ?? undefined}
           onLoadedMetadata={handleLoadedMetadata}
@@ -1062,7 +1312,124 @@ export function LocalFileRoomPlayer({
           onPlay={handlePlay}
           onPause={handlePause}
           onSeeked={handleSeeked}
+          onTimeUpdate={handleTimeUpdate}
+          onVolumeChange={handleVolumeChange}
+          onDoubleClick={() => {
+            void toggleFullscreen();
+          }}
         />
+        {mediaUrl && !isPlaying ? (
+          <button className="local-player-center-action" type="button" onClick={togglePlayback} aria-label="Play video">
+            <PlayIcon />
+          </button>
+        ) : null}
+        <div className={`local-player-overlay ${isPointerActive ? "local-player-overlay--visible" : "local-player-overlay--hidden"}`}>
+          <div className="local-player-topbar">
+            <div className="local-player-title-block">
+              <strong>{mediaTitle}</strong>
+              <span>{subtitleLabel}</span>
+            </div>
+            <div className="local-player-view-modes">
+              <div className="local-player-badge">
+                <span className={`local-player-dot ${isPlaying ? "local-player-dot--live" : ""}`} />
+                <span>{isPlaying ? "In sync" : "Paused in room"}</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="local-player-bottom">
+            <div className="local-player-scrubber">
+              <input
+                className="local-player-range"
+                type="range"
+                min={0}
+                max={safeDuration}
+                step={0.1}
+                value={Math.min(currentTime, safeDuration)}
+                onChange={(event) => {
+                  revealControls();
+                  handleTimelineInput(event);
+                }}
+                disabled={!mediaUrl || duration <= 0}
+                aria-label="Playback timeline"
+                style={
+                  {
+                    "--player-progress": `${progressPercent}%`
+                  } as React.CSSProperties
+                }
+              />
+            </div>
+
+            <div className="local-player-controls">
+              <div className="local-player-control-group">
+                <button className="local-player-icon-button" type="button" onClick={() => {
+                  revealControls();
+                  togglePlayback();
+                }} disabled={!mediaUrl} aria-label={isPlaying ? "Pause video" : "Play video"}>
+                  {isPlaying ? <PauseIcon /> : <PlayIcon />}
+                </button>
+                <button className="local-player-icon-button" type="button" onClick={() => {
+                  revealControls();
+                  toggleMute();
+                }} disabled={!mediaUrl} aria-label={isMuted || volume === 0 ? "Unmute video" : "Mute video"}>
+                  {isMuted || volume === 0 ? <VolumeMutedIcon /> : <VolumeHighIcon />}
+                </button>
+                <input
+                  className="local-player-volume"
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  value={isMuted ? 0 : volume}
+                  onChange={(event) => {
+                    revealControls();
+                    handleVolumeInput(event);
+                  }}
+                  disabled={!mediaUrl}
+                  aria-label="Volume"
+                  style={
+                    {
+                      "--player-progress": `${volumePercent}%`
+                    } as React.CSSProperties
+                  }
+                />
+              </div>
+
+              <div className="local-player-time-block">
+                <div className="local-player-time">
+                  <strong>{formatTime(currentTime)}</strong>
+                  <span>/ {formatTime(duration)}</span>
+                </div>
+                <div className="local-player-time-actions">
+                  <button
+                    className="local-player-toolbar-button local-player-toolbar-button--icon"
+                    type="button"
+                    onClick={() => {
+                      revealControls();
+                      onTheaterModeChange(!isTheaterMode);
+                    }}
+                    aria-label={isTheaterMode ? "Exit theater mode" : "Enter theater mode"}
+                    title={isTheaterMode ? "Exit theater mode" : "Enter theater mode"}
+                  >
+                    <TheaterIcon />
+                  </button>
+                  <button
+                    className="local-player-toolbar-button local-player-toolbar-button--icon"
+                    type="button"
+                    onClick={() => {
+                      revealControls();
+                      void toggleFullscreen();
+                    }}
+                    aria-label={isFullscreenMode ? "Exit fullscreen" : "Enter fullscreen"}
+                    title={isFullscreenMode ? "Exit fullscreen" : "Enter fullscreen"}
+                  >
+                    <ExpandIcon />
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
       <div className="local-player-meta">
         <strong>{room.mediaSource.fileName}</strong>
@@ -1083,6 +1450,8 @@ export function LocalFileRoomPlayer({
 
   function applyAuthoritativeState(video: HTMLVideoElement, authoritativeRoom: RoomState) {
     suppressEventsRef.current = true;
+    setIsPlaying(authoritativeRoom.playbackState === "playing");
+    setCurrentTime(authoritativeRoom.currentTime);
     debugLog(debugRole, "applyAuthoritativeState", {
       playbackState: authoritativeRoom.playbackState,
       currentTime: authoritativeRoom.currentTime,
@@ -1164,6 +1533,7 @@ export function LocalFileRoomPlayer({
     });
 
     video.currentTime = pendingPlaybackRestore.time;
+    setCurrentTime(pendingPlaybackRestore.time);
 
     if (pendingPlaybackRestore.shouldPlay) {
       void video
@@ -1386,10 +1756,12 @@ function estimateByteOffset(targetTime: number, duration: number, totalBytes: nu
 }
 
 function formatTime(totalSeconds: number) {
-  const safeSeconds = Math.max(0, Math.floor(totalSeconds));
-  const minutes = Math.floor(safeSeconds / 60)
-    .toString()
-    .padStart(2, "0");
+  if (!Number.isFinite(totalSeconds) || totalSeconds < 0) {
+    return "0:00";
+  }
+
+  const safeSeconds = Math.floor(totalSeconds);
+  const minutes = Math.floor(safeSeconds / 60).toString();
   const seconds = (safeSeconds % 60).toString().padStart(2, "0");
   return `${minutes}:${seconds}`;
 }

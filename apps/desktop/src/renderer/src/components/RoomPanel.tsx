@@ -86,6 +86,7 @@ export function RoomPanel({
   const [copied, setCopied] = useState(false);
   const [logsCopied, setLogsCopied] = useState(false);
   const [showDebugLogs, setShowDebugLogs] = useState(import.meta.env.DEV);
+  const [isTheaterMode, setIsTheaterMode] = useState(false);
   const canToggleDebugLogs = import.meta.env.DEV;
 
   function handleCopyCode() {
@@ -163,7 +164,7 @@ export function RoomPanel({
         </div>
       </div>
 
-      <div className="room-grid">
+      <div className={`room-grid ${isTheaterMode ? "room-grid--theater" : ""}`}>
         <div className="player-card">
           {room.mediaSource.type === "youtube" ? (
             <YouTubeRoomPlayer
@@ -179,6 +180,7 @@ export function RoomPanel({
               room={room as RoomState & { mediaSource: LocalFileMediaSource }}
               selfId={selfId}
               localFile={localFile}
+              isTheaterMode={isTheaterMode}
               remoteCommand={remoteCommand}
               peerSignal={peerSignal}
               onDebug={onDebug}
@@ -189,6 +191,7 @@ export function RoomPanel({
               onPeerOffer={onPeerOffer}
               onPeerAnswer={onPeerAnswer}
               onPeerIceCandidate={onPeerIceCandidate}
+              onTheaterModeChange={setIsTheaterMode}
               onTransferState={onTransferState}
             />
           )}
@@ -199,7 +202,7 @@ export function RoomPanel({
           </div>
         </div>
 
-        <aside className="sidebar-card">
+        <aside className={`sidebar-card ${isTheaterMode ? "sidebar-card--hidden" : ""}`}>
           <div>
             <p className="eyebrow">Participants</p>
             <ul className="participant-list">
