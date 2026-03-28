@@ -672,6 +672,9 @@ export function LocalFileRoomPlayer({
     switch (message.type) {
       case "file-start":
         durationRef.current = message.duration ?? durationRef.current;
+        if (message.duration && Number.isFinite(message.duration) && message.duration > 0) {
+          setDuration(message.duration);
+        }
         updateLocalMessage("Preparing playback");
         await ensureTempCache();
         return;
@@ -929,9 +932,15 @@ export function LocalFileRoomPlayer({
     }
 
     const video = videoRef.current;
+    const resumeTime =
+      pendingSeekTimeRef.current ??
+      pendingPlaybackRestoreRef.current?.time ??
+      video?.currentTime ??
+      currentTime ??
+      room.currentTime;
     pendingPlaybackRestoreRef.current = {
-      time: pendingSeekTimeRef.current ?? video?.currentTime ?? room.currentTime,
-      shouldPlay: room.playbackState === "playing"
+      time: resumeTime,
+      shouldPlay: pendingPlaybackRestoreRef.current?.shouldPlay ?? room.playbackState === "playing"
     };
     suppressEventsRef.current = true;
 
@@ -1028,17 +1037,7 @@ export function LocalFileRoomPlayer({
       return false;
     }
 
-    if (pendingSeekTimeRef.current !== undefined) {
-      return true;
-    }
-
-    const effectiveTransferState = lastReportedTransferRef.current ?? room.transferState;
-
-    if (!effectiveTransferState?.isPlaybackReady) {
-      return true;
-    }
-
-    return room.playbackState === "playing";
+    return true;
   }
 
   function handlePlay() {
@@ -1083,6 +1082,27 @@ export function LocalFileRoomPlayer({
         hasMediaUrl: Boolean(mediaUrl)
       });
       return;
+    }
+
+    if (!isHost && room.playbackState === "playing") {
+      const bufferedUntilTime = getPlayableBufferedUntil(video);
+      const reachedBufferedEdge =
+        bufferedUntilTime !== undefined && video.currentTime >= bufferedUntilTime - 0.35;
+      const reachedLocalBlobEnd =
+        Number.isFinite(video.duration) && video.duration > 0 && video.currentTime >= video.duration - 0.35;
+
+      if (reachedBufferedEdge || reachedLocalBlobEnd) {
+        pendingSeekTimeRef.current = video.currentTime;
+        updateLocalMessage(`Buffering at ${formatTime(video.currentTime)}`);
+        publishTransferState(
+          buildTransferState("buffering", {
+            pendingSeekTime: video.currentTime,
+            message: `Buffering at ${formatTime(video.currentTime)}`
+          })
+        );
+        requestNextRange("seek");
+        return;
+      }
     }
 
     setIsPlaying(false);
@@ -1138,7 +1158,7 @@ export function LocalFileRoomPlayer({
       durationRef.current = video.duration;
     }
 
-    if (Number.isFinite(video.duration) && video.duration > 0) {
+    if ((isHost || durationRef.current <= 0) && Number.isFinite(video.duration) && video.duration > 0) {
       setDuration(video.duration);
     }
 
@@ -1154,7 +1174,7 @@ export function LocalFileRoomPlayer({
 
     setCurrentTime(video.currentTime);
 
-    if (Number.isFinite(video.duration) && video.duration > 0) {
+    if ((isHost || durationRef.current <= 0) && Number.isFinite(video.duration) && video.duration > 0) {
       setDuration(video.duration);
     }
   }
@@ -1314,6 +1334,9 @@ export function LocalFileRoomPlayer({
           onSeeked={handleSeeked}
           onTimeUpdate={handleTimeUpdate}
           onVolumeChange={handleVolumeChange}
+          onClick={() => {
+            togglePlayback();
+          }}
           onDoubleClick={() => {
             void toggleFullscreen();
           }}
