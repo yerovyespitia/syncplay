@@ -934,7 +934,7 @@ button:disabled {
 }
 
 .local-player-controls {
-  padding: 0;
+  padding: 0 4px 0 0;
 }
 
 .local-player-time-block {

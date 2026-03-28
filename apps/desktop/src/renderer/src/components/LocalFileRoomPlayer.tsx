@@ -1054,6 +1054,19 @@ export function LocalFileRoomPlayer({
 
     const bufferedUntilTime = isHost ? Number.POSITIVE_INFINITY : getPlayableBufferedUntil(video);
 
+    if (!isHost && !hasCurrentPlayableData(video)) {
+      pendingSeekTimeRef.current = video.currentTime;
+      updateLocalMessage(`Buffering at ${formatTime(video.currentTime)}`);
+      publishTransferState(
+        buildTransferState("buffering", {
+          pendingSeekTime: video.currentTime,
+          message: `Buffering at ${formatTime(video.currentTime)}`
+        })
+      );
+      requestNextRange("seek");
+      return;
+    }
+
     if (bufferedUntilTime !== undefined && video.currentTime >= bufferedUntilTime - 0.25) {
       debugLog(debugRole, "handlePlay requesting more buffer", {
         currentTime: video.currentTime,
@@ -1498,7 +1511,14 @@ export function LocalFileRoomPlayer({
     if (authoritativeRoom.playbackState === "playing") {
       const bufferedUntilTime = isHost ? Number.POSITIVE_INFINITY : getPlayableBufferedUntil(video);
 
-      if (bufferedUntilTime !== undefined && authoritativeRoom.currentTime > bufferedUntilTime - 0.25) {
+      if (!isHost && !hasCurrentPlayableData(video)) {
+        pendingPlaybackRestoreRef.current = {
+          time: authoritativeRoom.currentTime,
+          shouldPlay: true
+        };
+        pendingSeekTimeRef.current = authoritativeRoom.currentTime;
+        requestNextRange("seek");
+      } else if (bufferedUntilTime !== undefined && authoritativeRoom.currentTime > bufferedUntilTime - 0.25) {
         pendingSeekTimeRef.current = authoritativeRoom.currentTime;
         requestNextRange("seek");
       } else {
