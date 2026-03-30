@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { DesktopApi, PickedLocalFile } from "@syncplay/shared";
 import { parseYouTubeUrl } from "@syncplay/shared";
@@ -53,8 +53,21 @@ const fallbackDesktopApi: DesktopApi = {
   pickLocalFile: async () => null,
   readLocalFile: async () => new Uint8Array(),
   readLocalFileChunk: async () => new Uint8Array(),
-  createTempMediaCache: async () => "",
+  createTempMediaCache: async () => ({
+    cacheId: "",
+    mediaUrl: "",
+    fileUrl: "",
+    httpUrl: ""
+  }),
   writeTempMediaChunk: async () => undefined,
+  markTempMediaRangeAvailable: async () => undefined,
+  waitForTempMediaRange: async () => ({
+    availableEndByte: 0
+  }),
+  getTempMediaStatus: async () => ({
+    availableRanges: [],
+    contiguousBytes: 0
+  }),
   removeTempMediaCache: async () => undefined
 };
 
@@ -102,6 +115,54 @@ export default function App() {
   const parsedVideo = useMemo(() => parseYouTubeUrl(videoUrl), [videoUrl]);
   const canCreateRoom = sourceOption === "youtube" ? Boolean(parsedVideo) : Boolean(selectedLocalFile && selectedBrowserFile);
   const canJoinRoom = Boolean(roomCode.trim());
+
+  useEffect(() => {
+    if (!isDev) {
+      return;
+    }
+
+    window.__syncplayTest = {
+      getState: () => ({
+        connectionStatus,
+        room,
+        selfId,
+        sourceOption,
+        roomCode,
+        hasSelectedLocalFile: Boolean(selectedLocalFile),
+        selectedLocalFile,
+        localError,
+        error,
+        lastActionLabel
+      }),
+      selectSourceOption: (nextSourceOption: SourceOption) => {
+        setSourceOption(nextSourceOption);
+      },
+      joinRoomByCode: (nextRoomCode: string) => {
+        const normalizedRoomCode = nextRoomCode.trim().toUpperCase();
+        setRoomCode(normalizedRoomCode);
+        joinRoom(normalizedRoomCode);
+      },
+      createCurrentRoom: () => {
+        handleCreateRoom();
+      }
+    };
+
+    return () => {
+      delete window.__syncplayTest;
+    };
+  }, [
+    connectionStatus,
+    error,
+    isDev,
+    joinRoom,
+    lastActionLabel,
+    localError,
+    room,
+    roomCode,
+    selectedLocalFile,
+    selfId,
+    sourceOption
+  ]);
 
   function handlePickLocalFile() {
     fileInputRef.current?.click();

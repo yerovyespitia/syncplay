@@ -257,6 +257,28 @@ export interface PickedLocalFile extends LocalFileMediaSource {
   fileId: string;
 }
 
+export interface TempMediaCacheMetadata {
+  fileSize: number;
+  mimeType: string;
+  fileName: string;
+}
+
+export interface TempMediaCacheHandle {
+  cacheId: string;
+  mediaUrl: string;
+  fileUrl: string;
+  httpUrl: string;
+}
+
+export interface TempMediaRangeAvailability {
+  availableEndByte: number;
+}
+
+export interface TempMediaStatus {
+  availableRanges: ByteRange[];
+  contiguousBytes: number;
+}
+
 export interface DesktopApi {
   platform: string;
   electronVersion: string;
@@ -264,7 +286,15 @@ export interface DesktopApi {
   pickLocalFile(): Promise<PickedLocalFile | null>;
   readLocalFile(fileId: string): Promise<Uint8Array>;
   readLocalFileChunk(fileId: string, offset: number, length: number): Promise<Uint8Array>;
-  createTempMediaCache(mediaId: string): Promise<string>;
+  createTempMediaCache(mediaId: string, metadata: TempMediaCacheMetadata): Promise<TempMediaCacheHandle>;
   writeTempMediaChunk(cacheId: string, offset: number, bytes: Uint8Array): Promise<void>;
+  markTempMediaRangeAvailable(cacheId: string, startByte: number, endByte: number): Promise<void>;
+  waitForTempMediaRange(
+    cacheId: string,
+    startByte: number,
+    endByte: number,
+    timeoutMs?: number
+  ): Promise<TempMediaRangeAvailability>;
+  getTempMediaStatus(cacheId: string): Promise<TempMediaStatus>;
   removeTempMediaCache(cacheId: string): Promise<void>;
 }
