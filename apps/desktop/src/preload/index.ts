@@ -5,6 +5,7 @@ contextBridge.exposeInMainWorld("syncplayDesktop", {
   electronVersion: process.versions.electron,
   openDesktopWindow: () => ipcRenderer.invoke("syncplay:open-desktop-window"),
   pickLocalFile: () => ipcRenderer.invoke("syncplay:pick-local-file"),
+  pickLocalFileByPath: (filePath: string) => ipcRenderer.invoke("syncplay:pick-local-file-by-path", filePath),
   readLocalFile: async (fileId: string) => new Uint8Array(await ipcRenderer.invoke("syncplay:read-local-file", fileId)),
   readLocalFileChunk: async (fileId: string, offset: number, length: number) =>
     new Uint8Array(await ipcRenderer.invoke("syncplay:read-local-file-chunk", fileId, offset, length)),

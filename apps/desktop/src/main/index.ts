@@ -12,6 +12,7 @@ const localFiles = new Map<string, string>();
 const isDevMode = !app.isPackaged || Boolean(rendererUrl);
 const TEMP_MEDIA_WAIT_TIMEOUT_MS = 120_000;
 const SYNCPLAY_MEDIA_SCHEME = "syncplay-media";
+const STREAM_CHUNK_SIZE = 1024 * 1024;
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -107,6 +108,30 @@ function inferMimeType(filePath: string) {
   }
 }
 
+async function createPickedLocalFile(filePath: string) {
+  const stats = await fs.stat(filePath);
+
+  if (!stats.isFile()) {
+    throw new Error("Selected path is not a file.");
+  }
+
+  const fileId = crypto.randomUUID();
+  localFiles.set(fileId, filePath);
+  const mediaServerBaseUrl = await startMediaServer();
+  const encodedFileName = encodeURIComponent(path.basename(filePath));
+
+  return {
+    type: "local_file" as const,
+    mediaId: crypto.randomUUID(),
+    fileId,
+    fileUrl: pathToFileURL(filePath).toString(),
+    streamUrl: `${mediaServerBaseUrl}/local/${encodeURIComponent(fileId)}/${encodedFileName}`,
+    fileName: path.basename(filePath),
+    fileSize: stats.size,
+    mimeType: inferMimeType(filePath)
+  };
+}
+
 function mergeRanges(ranges: ByteRange[], incomingRange: ByteRange) {
   const nextRanges = [...ranges, incomingRange].sort((left, right) => left.startByte - right.startByte);
   const merged: ByteRange[] = [];
@@ -197,6 +222,20 @@ function getMediaCacheIdFromPathname(pathname: string | undefined) {
   return decodeURIComponent(segments[1]);
 }
 
+function getLocalFileIdFromPathname(pathname: string | undefined) {
+  if (!pathname) {
+    return null;
+  }
+
+  const segments = pathname.split("/").filter(Boolean);
+
+  if (segments[0] !== "local" || !segments[1]) {
+    return null;
+  }
+
+  return decodeURIComponent(segments[1]);
+}
+
 async function readMediaRange(filePath: string, startByte: number, endByte: number) {
   const byteLength = Math.max(0, endByte - startByte);
   const handle = await fs.open(filePath, "r");
@@ -207,6 +246,39 @@ async function readMediaRange(filePath: string, startByte: number, endByte: numb
     return buffer.subarray(0, bytesRead);
   } finally {
     await handle.close();
+  }
+}
+
+function createStaticMediaSession(filePath: string, fileSize: number): MediaCacheSession {
+  return {
+    mediaId: "",
+    fileName: path.basename(filePath),
+    filePath,
+    mimeType: inferMimeType(filePath),
+    fileSize,
+    availableRanges: [],
+    waiters: []
+  };
+}
+
+async function streamStaticMediaBytes(response: ServerResponse, filePath: string, startByte: number, endByte: number) {
+  let offset = startByte;
+
+  while (offset < endByte) {
+    const bytes = await readMediaRange(filePath, offset, Math.min(endByte, offset + STREAM_CHUNK_SIZE));
+
+    if (bytes.byteLength === 0) {
+      throw new Error("Media stream read returned zero bytes.");
+    }
+
+    const shouldContinue = response.write(bytes);
+    offset += bytes.byteLength;
+
+    if (!shouldContinue) {
+      await new Promise<void>((resolve) => {
+        response.once("drain", resolve);
+      });
+    }
   }
 }
 
@@ -308,14 +380,15 @@ async function streamMediaBytes(
     const availableEndByte = getContiguousAvailableEnd(session.availableRanges, offset, endByte);
 
     if (availableEndByte > offset) {
-      const bytes = await readMediaRange(session.filePath, offset, availableEndByte);
+      const chunkEndByte = Math.min(availableEndByte, offset + STREAM_CHUNK_SIZE);
+      const bytes = await readMediaRange(session.filePath, offset, chunkEndByte);
 
       if (bytes.byteLength === 0) {
         throw new Error("Media stream read returned zero bytes.");
       }
 
       const shouldContinue = response.write(bytes);
-      offset = availableEndByte;
+      offset = chunkEndByte;
 
       if (!shouldContinue) {
         await new Promise<void>((resolve) => {
@@ -341,7 +414,68 @@ async function handleMediaServerRequest(request: IncomingMessage, response: Serv
   const cacheId = getMediaCacheIdFromPathname(requestUrl?.pathname);
 
   if (!cacheId) {
-    writeErrorResponse(response, 404, "Media cache not found.");
+    const localFileId = getLocalFileIdFromPathname(requestUrl?.pathname);
+
+    if (!localFileId) {
+      writeErrorResponse(response, 404, "Media cache not found.");
+      return;
+    }
+
+    const filePath = localFiles.get(localFileId);
+
+    if (!filePath) {
+      writeErrorResponse(response, 404, "Local file not found.");
+      return;
+    }
+
+    const stats = await fs.stat(filePath);
+    const session = createStaticMediaSession(filePath, stats.size);
+    const method = (request.method ?? "GET").toUpperCase();
+
+    if (method !== "GET" && method !== "HEAD") {
+      writeErrorResponse(response, 405, "Method not allowed.");
+      return;
+    }
+
+    const rangeHeader = typeof request.headers.range === "string" ? request.headers.range : null;
+
+    if (!rangeHeader) {
+      writeMediaHeaders(response, session, 200, stats.size);
+
+      if (method === "HEAD") {
+        response.end();
+        return;
+      }
+
+      await streamStaticMediaBytes(response, filePath, 0, stats.size);
+      response.end();
+      return;
+    }
+
+    const requestedRange = parseByteRange(rangeHeader, stats.size);
+
+    if (!requestedRange) {
+      writeErrorResponse(response, 416, "Invalid byte range.");
+      return;
+    }
+
+    const contentLength = Math.max(0, requestedRange.endByte - requestedRange.startByte);
+    const inclusiveEndByte = requestedRange.endByte - 1;
+    writeMediaHeaders(
+      response,
+      session,
+      206,
+      contentLength,
+      `bytes ${requestedRange.startByte}-${inclusiveEndByte}/${stats.size}`
+    );
+
+    if (method === "HEAD") {
+      response.end();
+      return;
+    }
+
+    await streamStaticMediaBytes(response, filePath, requestedRange.startByte, requestedRange.endByte);
+    response.end();
     return;
   }
 
@@ -486,14 +620,15 @@ async function buildMediaProtocolResponse(request: Request) {
             const availableEndByte = getContiguousAvailableEnd(session.availableRanges, offset, session.fileSize);
 
             if (availableEndByte > offset) {
-              const bytes = await readMediaRange(session.filePath, offset, availableEndByte);
+              const chunkEndByte = Math.min(availableEndByte, offset + STREAM_CHUNK_SIZE);
+              const bytes = await readMediaRange(session.filePath, offset, chunkEndByte);
 
               if (bytes.byteLength === 0) {
                 throw new Error("Media stream read returned zero bytes.");
               }
 
               controller.enqueue(new Uint8Array(bytes));
-              offset = availableEndByte;
+              offset = chunkEndByte;
               continue;
             }
 
@@ -548,14 +683,15 @@ async function buildMediaProtocolResponse(request: Request) {
           const availableEndByte = getContiguousAvailableEnd(session.availableRanges, offset, requestedRange.endByte);
 
           if (availableEndByte > offset) {
-            const bytes = await readMediaRange(session.filePath, offset, availableEndByte);
+            const chunkEndByte = Math.min(availableEndByte, offset + STREAM_CHUNK_SIZE);
+            const bytes = await readMediaRange(session.filePath, offset, chunkEndByte);
 
             if (bytes.byteLength === 0) {
               throw new Error("Media stream read returned zero bytes.");
             }
 
             controller.enqueue(new Uint8Array(bytes));
-            offset = availableEndByte;
+            offset = chunkEndByte;
             continue;
           }
 
@@ -648,19 +784,15 @@ app.whenReady().then(() => {
       return null;
     }
 
-    const filePath = result.filePaths[0];
-    const stats = await fs.stat(filePath);
-    const fileId = crypto.randomUUID();
-    localFiles.set(fileId, filePath);
+    return createPickedLocalFile(result.filePaths[0]);
+  });
 
-    return {
-      type: "local_file",
-      mediaId: crypto.randomUUID(),
-      fileId,
-      fileName: path.basename(filePath),
-      fileSize: stats.size,
-      mimeType: inferMimeType(filePath)
-    };
+  ipcMain.handle("syncplay:pick-local-file-by-path", async (_, filePath: string) => {
+    if (typeof filePath !== "string" || filePath.trim().length === 0) {
+      return null;
+    }
+
+    return createPickedLocalFile(filePath.trim());
   });
 
   ipcMain.handle("syncplay:read-local-file", async (_, fileId: string) => {
@@ -695,6 +827,7 @@ app.whenReady().then(() => {
     "syncplay:create-temp-media-cache",
     async (_, mediaId: string, metadata: { fileSize: number; mimeType: string; fileName: string }) => {
       const cacheId = crypto.randomUUID();
+      const localFileId = crypto.randomUUID();
       const tempDir = path.join(os.tmpdir(), "syncplay-media-cache");
       await fs.mkdir(tempDir, { recursive: true });
       const cachePath = path.join(tempDir, `${mediaId}-${cacheId}.bin`);
@@ -702,8 +835,10 @@ app.whenReady().then(() => {
       const mediaServerBaseUrl = await startMediaServer();
       const encodedFileName = encodeURIComponent(metadata.fileName || `${mediaId}.bin`);
       const httpUrl = `${mediaServerBaseUrl}/cache/${encodeURIComponent(cacheId)}/${encodedFileName}`;
+      const localHttpUrl = `${mediaServerBaseUrl}/local/${encodeURIComponent(localFileId)}/${encodedFileName}`;
       const fileUrl = pathToFileURL(cachePath).toString();
       const protocolUrl = `${SYNCPLAY_MEDIA_SCHEME}://cache/${encodeURIComponent(cacheId)}/${encodedFileName}`;
+      localFiles.set(localFileId, cachePath);
 
       tempMediaCaches.set(cacheId, {
         mediaId,
@@ -719,7 +854,8 @@ app.whenReady().then(() => {
         cacheId,
         mediaUrl: protocolUrl,
         fileUrl,
-        httpUrl
+        httpUrl,
+        localHttpUrl
       };
     }
   );

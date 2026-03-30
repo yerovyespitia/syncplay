@@ -255,6 +255,8 @@ export interface ClientEnvelope<TType extends ClientEvent["type"] = ClientEvent[
 
 export interface PickedLocalFile extends LocalFileMediaSource {
   fileId: string;
+  fileUrl: string;
+  streamUrl: string;
 }
 
 export interface TempMediaCacheMetadata {
@@ -268,6 +270,7 @@ export interface TempMediaCacheHandle {
   mediaUrl: string;
   fileUrl: string;
   httpUrl: string;
+  localHttpUrl: string;
 }
 
 export interface TempMediaRangeAvailability {
@@ -284,6 +287,7 @@ export interface DesktopApi {
   electronVersion: string;
   openDesktopWindow(): Promise<void>;
   pickLocalFile(): Promise<PickedLocalFile | null>;
+  pickLocalFileByPath(filePath: string): Promise<PickedLocalFile | null>;
   readLocalFile(fileId: string): Promise<Uint8Array>;
   readLocalFileChunk(fileId: string, offset: number, length: number): Promise<Uint8Array>;
   createTempMediaCache(mediaId: string, metadata: TempMediaCacheMetadata): Promise<TempMediaCacheHandle>;

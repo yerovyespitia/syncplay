@@ -51,13 +51,15 @@ const fallbackDesktopApi: DesktopApi = {
   electronVersion: detectElectronVersion(),
   openDesktopWindow: async () => undefined,
   pickLocalFile: async () => null,
+  pickLocalFileByPath: async () => null,
   readLocalFile: async () => new Uint8Array(),
   readLocalFileChunk: async () => new Uint8Array(),
   createTempMediaCache: async () => ({
     cacheId: "",
     mediaUrl: "",
     fileUrl: "",
-    httpUrl: ""
+    httpUrl: "",
+    localHttpUrl: ""
   }),
   writeTempMediaChunk: async () => undefined,
   markTempMediaRangeAvailable: async () => undefined,
@@ -81,7 +83,7 @@ export default function App() {
   const [videoUrl, setVideoUrl] = useState("");
   const [roomCode, setRoomCode] = useState("");
   const [selectedLocalFile, setSelectedLocalFile] = useState<PickedLocalFile | null>(null);
-  const [selectedBrowserFile, setSelectedBrowserFile] = useState<File | null>(null);
+  const [selectedPlaybackFile, setSelectedPlaybackFile] = useState<PickedLocalFile | File | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const {
@@ -113,7 +115,7 @@ export default function App() {
     (sourceOption === "local_file" || (room !== null && room.mediaSource.type === "local_file"));
 
   const parsedVideo = useMemo(() => parseYouTubeUrl(videoUrl), [videoUrl]);
-  const canCreateRoom = sourceOption === "youtube" ? Boolean(parsedVideo) : Boolean(selectedLocalFile && selectedBrowserFile);
+  const canCreateRoom = sourceOption === "youtube" ? Boolean(parsedVideo) : Boolean(selectedLocalFile);
   const canJoinRoom = Boolean(roomCode.trim());
 
   useEffect(() => {
@@ -130,12 +132,25 @@ export default function App() {
         roomCode,
         hasSelectedLocalFile: Boolean(selectedLocalFile),
         selectedLocalFile,
+        debugEntries,
         localError,
         error,
         lastActionLabel
       }),
       selectSourceOption: (nextSourceOption: SourceOption) => {
         setSourceOption(nextSourceOption);
+      },
+      selectLocalFileByPath: async (filePath: string) => {
+        const pickedFile = await desktopApi.pickLocalFileByPath(filePath);
+
+        if (!pickedFile) {
+          return null;
+        }
+
+        setSelectedLocalFile(pickedFile);
+        setSelectedPlaybackFile(pickedFile);
+        setLocalError(null);
+        return pickedFile;
       },
       joinRoomByCode: (nextRoomCode: string) => {
         const normalizedRoomCode = nextRoomCode.trim().toUpperCase();
@@ -157,6 +172,7 @@ export default function App() {
     joinRoom,
     lastActionLabel,
     localError,
+    debugEntries,
     room,
     roomCode,
     selectedLocalFile,
@@ -164,7 +180,20 @@ export default function App() {
     sourceOption
   ]);
 
-  function handlePickLocalFile() {
+  async function handlePickLocalFile() {
+    if (window.syncplayDesktop) {
+      const pickedFile = await desktopApi.pickLocalFile();
+
+      if (!pickedFile) {
+        return;
+      }
+
+      setSelectedLocalFile(pickedFile);
+      setSelectedPlaybackFile(pickedFile);
+      setLocalError(null);
+      return;
+    }
+
     fileInputRef.current?.click();
   }
 
@@ -179,12 +208,14 @@ export default function App() {
       type: "local_file",
       mediaId: crypto.randomUUID(),
       fileId: crypto.randomUUID(),
+      fileUrl: URL.createObjectURL(browserFile),
+      streamUrl: "",
       fileName: browserFile.name,
       fileSize: browserFile.size,
       mimeType: browserFile.type || "application/octet-stream"
     };
 
-    setSelectedBrowserFile(browserFile);
+    setSelectedPlaybackFile(browserFile);
     setSelectedLocalFile(pickedFile);
     setLocalError(null);
   }
@@ -385,7 +416,7 @@ export default function App() {
       ) : (
         <RoomPanel
           room={room}
-          localFile={selectedBrowserFile}
+          localFile={selectedPlaybackFile}
           selfId={selfId}
           remoteCommand={remoteCommand}
           debugEntries={debugEntries}

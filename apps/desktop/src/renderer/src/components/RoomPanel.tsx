@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-import type { LocalFileMediaSource, RoomState, TransferState, YoutubeMediaSource } from "@syncplay/shared";
+import type { LocalFileMediaSource, PickedLocalFile, RoomState, TransferState, YoutubeMediaSource } from "@syncplay/shared";
 
 import type { DebugEntry } from "../hooks/useRoomConnection";
 import { LocalFileRoomPlayer } from "./LocalFileRoomPlayer";
@@ -46,7 +46,7 @@ type PeerSignal =
 
 interface RoomPanelProps {
   room: RoomState;
-  localFile: File | null;
+  localFile: PickedLocalFile | File | null;
   selfId: string | null;
   remoteCommand: RemotePlaybackCommand | null;
   debugEntries: DebugEntry[];

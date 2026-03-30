@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import type { ByteRange, LocalFileMediaSource, RangeRequestReason, RoomState, TransferState } from "@syncplay/shared";
+import type { ByteRange, LocalFileMediaSource, PickedLocalFile, RangeRequestReason, RoomState, TransferState } from "@syncplay/shared";
 
 type RemotePlaybackCommand =
   | {
@@ -43,7 +43,7 @@ type PeerSignal =
 interface LocalFileRoomPlayerProps {
   room: RoomState & { mediaSource: LocalFileMediaSource };
   selfId: string | null;
-  localFile: File | null;
+  localFile: PickedLocalFile | File | null;
   isTheaterMode: boolean;
   remoteCommand: RemotePlaybackCommand | null;
   peerSignal: PeerSignal | null;
@@ -482,7 +482,7 @@ export function LocalFileRoomPlayer({
     cacheIdRef.current = cacheHandle.cacheId;
     cacheMediaUrlRef.current = cacheHandle.mediaUrl;
     cacheFileUrlRef.current = cacheHandle.fileUrl;
-    mediaUrlCandidatesRef.current = [cacheHandle.mediaUrl, cacheHandle.fileUrl, cacheHandle.httpUrl].filter(Boolean);
+    mediaUrlCandidatesRef.current = [cacheHandle.localHttpUrl].filter(Boolean);
     activeMediaUrlIndexRef.current = -1;
 
     return cacheHandle;
@@ -551,14 +551,17 @@ export function LocalFileRoomPlayer({
     }
 
     preparingHostMediaRef.current = true;
+    const hostFileName = "fileId" in localFile ? localFile.fileName : localFile.name;
+    const hostFileSize = "fileId" in localFile ? localFile.fileSize : localFile.size;
+    const hostMimeType = "fileId" in localFile ? localFile.mimeType : localFile.type;
     debugLog(debugRole, "prepareHostMedia start", {
-      fileName: localFile.name,
-      fileSize: localFile.size,
-      mimeType: localFile.type
+      fileName: hostFileName,
+      fileSize: hostFileSize,
+      mimeType: hostMimeType
     });
 
     try {
-      const url = createObjectUrlFromFile(localFile);
+      const url = "fileId" in localFile ? localFile.streamUrl || localFile.fileUrl : createObjectUrlFromFile(localFile);
       setMediaUrl(url);
       updateLocalMessage("File ready on host");
       debugLog(debugRole, "prepareHostMedia success", { url });
@@ -835,17 +838,7 @@ export function LocalFileRoomPlayer({
         updateLocalMessage(`Buffering at ${formatTime(message.targetTime)}`);
         return;
       case "file-complete":
-        if (!mediaUrl) {
-          switchToNextGuestMediaUrl("file-complete");
-        }
-        publishTransferState(
-          buildTransferState("ended", {
-            message: "Transfer complete",
-            bytesReceived: room.mediaSource.fileSize,
-            bytesPersisted: room.mediaSource.fileSize
-          }),
-          true
-        );
+        updateLocalMessage("Finalizing local file");
         return;
     }
   }
@@ -878,7 +871,7 @@ export function LocalFileRoomPlayer({
 
     while (offset < request.endByte) {
       const length = Math.min(CHUNK_SIZE, request.endByte - offset);
-      const chunk = new Uint8Array(await localFile.slice(offset, offset + length).arrayBuffer());
+      const chunk = await readLocalChunk(localFile, offset, length);
 
       if (chunk.byteLength === 0) {
         break;
@@ -919,6 +912,14 @@ export function LocalFileRoomPlayer({
     }
   }
 
+  async function readLocalChunk(file: PickedLocalFile | File, offset: number, length: number) {
+    if ("fileId" in file) {
+      return desktopApi.readLocalFileChunk(file.fileId, offset, length);
+    }
+
+    return new Uint8Array(await file.slice(offset, offset + length).arrayBuffer());
+  }
+
   async function handleBinaryChunk(payload: Blob | ArrayBuffer) {
     const range = pendingChunkMetaRef.current;
 
@@ -928,17 +929,18 @@ export function LocalFileRoomPlayer({
 
     const chunk = payload instanceof Blob ? new Uint8Array(await payload.arrayBuffer()) : new Uint8Array(payload);
     pendingChunkMetaRef.current = null;
-    availableRangesRef.current = mergeRanges(availableRangesRef.current, {
-      startByte: range.startByte,
-      endByte: range.startByte + chunk.byteLength
-    });
-    contiguousBytesRef.current = getContiguousEnd(availableRangesRef.current);
 
     const cacheHandle = await ensureTempCache();
     if (cacheHandle.cacheId) {
       await desktopApi.writeTempMediaChunk(cacheHandle.cacheId, range.startByte, chunk);
       await desktopApi.markTempMediaRangeAvailable(cacheHandle.cacheId, range.startByte, range.startByte + chunk.byteLength);
     }
+
+    availableRangesRef.current = mergeRanges(availableRangesRef.current, {
+      startByte: range.startByte,
+      endByte: range.startByte + chunk.byteLength
+    });
+    contiguousBytesRef.current = getContiguousEnd(availableRangesRef.current);
 
     publishTransferState(
       buildTransferState("buffering", {
