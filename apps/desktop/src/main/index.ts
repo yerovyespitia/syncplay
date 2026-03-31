@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, protocol, shell, type OpenDialogOptions } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, protocol, shell, type OpenDialogOptions } from "electron";
 import { electronApp, optimizer } from "@electron-toolkit/utils";
 import { promises as fs } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
@@ -91,6 +91,16 @@ let webTorrentModulePromise: Promise<any> | null = null;
 
 app.commandLine.appendSwitch("autoplay-policy", "no-user-gesture-required");
 
+function resolveWindowIconPath() {
+  return process.platform === "win32"
+    ? path.resolve(__dirname, "../../resources/icon.ico")
+    : path.resolve(__dirname, "../../resources/icon.png");
+}
+
+function resolveMacAppIconPath() {
+  return path.resolve(__dirname, "../../resources/icon.png");
+}
+
 function createWindow() {
   const mainWindow = new BrowserWindow({
     width: 1280,
@@ -101,6 +111,7 @@ function createWindow() {
     autoHideMenuBar: true,
     titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
     backgroundColor: "#0a0a0b",
+    icon: resolveWindowIconPath(),
     webPreferences: {
       preload: path.join(__dirname, "../preload/index.mjs"),
       sandbox: false,
@@ -1017,6 +1028,9 @@ function startMediaServer() {
 
 app.whenReady().then(() => {
   electronApp.setAppUserModelId("com.syncplay.desktop");
+  if (process.platform === "darwin" && app.dock) {
+    app.dock.setIcon(nativeImage.createFromPath(resolveMacAppIconPath()));
+  }
   void startMediaServer();
   protocol.handle(SYNCPLAY_MEDIA_SCHEME, (request) => buildMediaProtocolResponse(request));
 

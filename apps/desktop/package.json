@@ -7,7 +7,37 @@
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
+    "dist": "bun run build && electron-builder",
+    "dist:mac": "bun run build && electron-builder --mac",
+    "dist:win": "bun run build && electron-builder --win",
+    "dist:linux": "bun run build && electron-builder --linux",
     "check": "tsc --noEmit -p tsconfig.json"
+  },
+  "build": {
+    "appId": "com.syncplay.desktop",
+    "productName": "SyncPlay",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "out/**/*",
+      "package.json"
+    ],
+    "asar": true,
+    "mac": {
+      "category": "public.app-category.entertainment",
+      "icon": "resources/icon.icns"
+    },
+    "win": {
+      "icon": "resources/icon.ico"
+    },
+    "linux": {
+      "icon": "resources/icon.png",
+      "target": [
+        "AppImage"
+      ],
+      "category": "AudioVideo"
+    }
   },
   "dependencies": {
     "@syncplay/shared": "workspace:*",
@@ -25,6 +55,7 @@
     "@types/youtube": "^0.1.2",
     "@vitejs/plugin-react": "^4.3.4",
     "electron": "^35.0.2",
+    "electron-builder": "^26.8.1",
     "electron-vite": "^3.1.0",
     "vite": "^6.2.1"
   }

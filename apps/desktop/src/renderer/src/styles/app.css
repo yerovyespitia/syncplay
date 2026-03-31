@@ -95,8 +95,8 @@ button:disabled {
 }
 
 .top-bar-brand__logo {
-  width: 44px;
-  height: 44px;
+  width: 60px;
+  height: 60px;
   flex: none;
   filter: drop-shadow(0 8px 20px rgba(124, 58, 237, 0.22));
 }
@@ -686,7 +686,7 @@ button:disabled {
 .local-player-wrapper {
   position: relative;
   overflow: hidden;
-  border-radius: 22px;
+  border-radius: 12px;
   aspect-ratio: 16 / 9;
   background: #000;
   border: 1px solid rgba(255, 255, 255, 0.06);
@@ -918,6 +918,15 @@ button:disabled {
   background: transparent;
   cursor: pointer;
   transition: color 130ms ease, opacity 130ms ease, transform 130ms ease;
+}
+
+.local-player-toolbar-button:focus,
+.local-player-toolbar-button:focus-visible,
+.local-player-icon-button:focus,
+.local-player-icon-button:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+  border-color: transparent !important;
 }
 
 .local-player-toolbar-button--icon,
