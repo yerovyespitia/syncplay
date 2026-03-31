@@ -34,6 +34,7 @@ describe("RoomManager", () => {
     const joined = manager.joinRoom(created.room.roomId, participantB);
 
     expect(created.room.hostParticipantId).toBe(participantA.id);
+    expect(created.room.chatMessages).toEqual([]);
     expect(joined.ok).toBeTrue();
     if (joined.ok) {
       expect(joined.room.participants).toHaveLength(2);
@@ -85,5 +86,54 @@ describe("RoomManager", () => {
     });
 
     expect(thirdJoin.ok).toBeFalse();
+  });
+
+  test("stores user chat messages in the room", () => {
+    const manager = new RoomManager();
+    const created = manager.createRoom(youtubeSource, participantA);
+    const result = manager.addChatMessage(created.room.roomId, {
+      kind: "user",
+      senderParticipantId: participantA.id,
+      senderDisplayName: "Alice",
+      text: "Hello room"
+    });
+
+    expect(result).not.toBeNull();
+    expect(result?.message.kind).toBe("user");
+    expect(result?.room.chatMessages).toHaveLength(1);
+    expect(result?.room.chatMessages[0]?.text).toBe("Hello room");
+  });
+
+  test("stores system chat messages in the room", () => {
+    const manager = new RoomManager();
+    const created = manager.createRoom(youtubeSource, participantA);
+    const result = manager.addChatMessage(created.room.roomId, {
+      kind: "system",
+      senderParticipantId: participantA.id,
+      senderDisplayName: "Alice",
+      text: "Alice joined the room."
+    });
+
+    expect(result?.room.chatMessages[0]?.kind).toBe("system");
+    expect(result?.room.chatMessages[0]?.senderDisplayName).toBe("Alice");
+  });
+
+  test("keeps only the latest 100 chat messages", () => {
+    const manager = new RoomManager();
+    const created = manager.createRoom(youtubeSource, participantA);
+
+    for (let index = 0; index < 105; index += 1) {
+      manager.addChatMessage(created.room.roomId, {
+        kind: "user",
+        senderParticipantId: participantA.id,
+        senderDisplayName: "Alice",
+        text: `Message ${index}`
+      });
+    }
+
+    const room = manager.getRoom(created.room.roomId);
+    expect(room?.chatMessages).toHaveLength(100);
+    expect(room?.chatMessages[0]?.text).toBe("Message 5");
+    expect(room?.chatMessages.at(-1)?.text).toBe("Message 104");
   });
 });

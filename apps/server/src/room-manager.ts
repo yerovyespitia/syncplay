@@ -1,4 +1,5 @@
 import {
+  type ChatMessage,
   type MediaSource,
   type Participant,
   type PlaybackState,
@@ -12,6 +13,8 @@ type RoomRecord = {
   state: RoomState;
   participants: Map<string, Participant>;
 };
+
+const MAX_CHAT_MESSAGES = 100;
 
 export class RoomManager {
   private readonly rooms = new Map<string, RoomRecord>();
@@ -32,6 +35,7 @@ export class RoomManager {
       updatedAt: now,
       lastEventId: 0,
       participants: [participant],
+      chatMessages: [],
       hostParticipantId: participant.id,
       transferState:
         mediaSource.type === "local_file"
@@ -133,6 +137,36 @@ export class RoomManager {
     return this.rooms.get(normalizeRoomId(roomId))?.state ?? null;
   }
 
+  addChatMessage(
+    roomId: string,
+    message: Omit<ChatMessage, "id" | "roomId" | "createdAt">
+  ) {
+    const record = this.rooms.get(normalizeRoomId(roomId));
+
+    if (!record) {
+      return null;
+    }
+
+    const nextMessage: ChatMessage = {
+      id: crypto.randomUUID(),
+      roomId: record.state.roomId,
+      createdAt: Date.now(),
+      ...message
+    };
+
+    record.state = {
+      ...record.state,
+      chatMessages: appendChatMessage(record.state.chatMessages, nextMessage),
+      updatedAt: Date.now(),
+      participants: Array.from(record.participants.values())
+    };
+
+    return {
+      room: record.state,
+      message: nextMessage
+    };
+  }
+
   applyPlaybackAction(
     roomId: string,
     actorId: string,
@@ -206,4 +240,14 @@ function clampPlaybackTime(value: number) {
   }
 
   return Math.max(0, value);
+}
+
+function appendChatMessage(messages: ChatMessage[], nextMessage: ChatMessage) {
+  const nextMessages = [...messages, nextMessage];
+
+  if (nextMessages.length <= MAX_CHAT_MESSAGES) {
+    return nextMessages;
+  }
+
+  return nextMessages.slice(nextMessages.length - MAX_CHAT_MESSAGES);
 }

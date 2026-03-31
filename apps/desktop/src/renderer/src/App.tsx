@@ -169,6 +169,7 @@ export default function App() {
     joinRoom,
     leaveRoom,
     requestSync,
+    sendChatMessage,
     updateTransferState,
     sendPeerOffer,
     sendPeerAnswer,
@@ -500,6 +501,7 @@ export default function App() {
           lastActionLabel={lastActionLabel}
           onLeave={leaveRoom}
           onRequestSync={requestSync}
+          onSendChatMessage={sendChatMessage}
           onPlay={sendPlay}
           onPause={sendPause}
           onSeek={sendSeek}

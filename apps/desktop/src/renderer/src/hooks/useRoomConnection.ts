@@ -121,6 +121,23 @@ export function useRoomConnection() {
         setRoom(event.payload.room);
         setLastActionLabel(`${event.payload.room.participants.length} participant(s) connected`);
         return;
+      case "chat_message_received":
+        setRoom((current) => {
+          if (!current || current.roomId !== event.payload.message.roomId) {
+            return current;
+          }
+
+          if (current.chatMessages.some((message) => message.id === event.payload.message.id)) {
+            return current;
+          }
+
+          return {
+            ...current,
+            chatMessages: [...current.chatMessages, event.payload.message]
+          };
+        });
+        setLastActionLabel(`New chat message from ${event.payload.message.senderDisplayName ?? "room"}`);
+        return;
       case "transfer_state_updated":
       case "local_file_ready":
       case "local_file_buffering":
@@ -314,6 +331,23 @@ export function useRoomConnection() {
     });
   }, [room, send]);
 
+  const sendChatMessage = useCallback(
+    (text: string) => {
+      if (!room) {
+        return;
+      }
+
+      send({
+        type: "send_chat_message",
+        payload: {
+          roomId: room.roomId,
+          text
+        }
+      });
+    },
+    [room, send]
+  );
+
   const sendPlaybackAction = useCallback(
     (type: "player_play" | "player_pause" | "player_seek", currentTime: number) => {
       if (!room) {
@@ -421,6 +455,7 @@ export function useRoomConnection() {
     joinRoom,
     leaveRoom,
     requestSync,
+    sendChatMessage,
     updateTransferState,
     sendPeerOffer,
     sendPeerAnswer,

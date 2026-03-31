@@ -22,6 +22,18 @@ export interface Participant {
   connectedAt: number;
 }
 
+export type ChatMessageKind = "user" | "system";
+
+export interface ChatMessage {
+  id: string;
+  roomId: string;
+  senderParticipantId: string;
+  senderDisplayName?: string;
+  kind: ChatMessageKind;
+  text: string;
+  createdAt: number;
+}
+
 export interface YoutubeMediaSource {
   type: "youtube";
   videoId: string;
@@ -61,6 +73,7 @@ export interface RoomState {
   updatedAt: number;
   lastEventId: number;
   participants: Participant[];
+  chatMessages: ChatMessage[];
   hostParticipantId?: string;
   transferState?: TransferState;
 }
@@ -114,6 +127,13 @@ export type ClientEvent =
       type: "leave_room";
       payload: {
         roomId: string;
+      };
+    }
+  | {
+      type: "send_chat_message";
+      payload: {
+        roomId: string;
+        text: string;
       };
     }
   | {
@@ -185,6 +205,12 @@ export type ServerEvent =
       type: "presence_updated";
       payload: {
         room: RoomState;
+      };
+    }
+  | {
+      type: "chat_message_received";
+      payload: {
+        message: ChatMessage;
       };
     }
   | {

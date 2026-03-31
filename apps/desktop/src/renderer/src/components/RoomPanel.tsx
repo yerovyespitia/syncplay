@@ -1,6 +1,13 @@
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
-import type { LocalFileMediaSource, PickedLocalFile, RoomState, TransferState, YoutubeMediaSource } from "@syncplay/shared";
+import type {
+  ChatMessage,
+  LocalFileMediaSource,
+  PickedLocalFile,
+  RoomState,
+  TransferState,
+  YoutubeMediaSource
+} from "@syncplay/shared";
 
 import type { DebugEntry } from "../hooks/useRoomConnection";
 import { LocalFileRoomPlayer } from "./LocalFileRoomPlayer";
@@ -54,6 +61,7 @@ interface RoomPanelProps {
   lastActionLabel: string;
   onLeave: () => void;
   onRequestSync: () => void;
+  onSendChatMessage: (text: string) => void;
   onPlay: (currentTime: number) => void;
   onPause: (currentTime: number) => void;
   onSeek: (currentTime: number) => void;
@@ -113,6 +121,31 @@ function getPlaybackReadyLabel(transferState: TransferState) {
   return "Preparing playback";
 }
 
+function formatChatTimestamp(value: number) {
+  return new Date(value).toLocaleTimeString([], {
+    hour: "numeric",
+    minute: "2-digit"
+  });
+}
+
+function getChatMessageClassName(message: ChatMessage, selfId: string | null) {
+  const classNames = ["chat-message"];
+
+  if (message.kind === "system") {
+    classNames.push("chat-message--system");
+  } else if (message.senderParticipantId === selfId) {
+    classNames.push("chat-message--own");
+  } else {
+    classNames.push("chat-message--remote");
+  }
+
+  return classNames.join(" ");
+}
+
+function isOwnChatMessage(message: ChatMessage, selfId: string | null) {
+  return message.kind !== "system" && message.senderParticipantId === selfId;
+}
+
 export function RoomPanel({
   room,
   localFile,
@@ -123,6 +156,7 @@ export function RoomPanel({
   lastActionLabel,
   onLeave,
   onRequestSync,
+  onSendChatMessage,
   onPlay,
   onPause,
   onSeek,
@@ -134,8 +168,13 @@ export function RoomPanel({
 }: RoomPanelProps) {
   const [copied, setCopied] = useState(false);
   const [logsCopied, setLogsCopied] = useState(false);
+  const [chatDraft, setChatDraft] = useState("");
+  const [sidebarHeight, setSidebarHeight] = useState<number | null>(null);
   const [showDebugLogs, setShowDebugLogs] = useState(import.meta.env.DEV);
   const [isTheaterMode, setIsTheaterMode] = useState(false);
+  const playerCardRef = useRef<HTMLDivElement | null>(null);
+  const chatMessageListRef = useRef<HTMLDivElement | null>(null);
+  const chatMessagesEndRef = useRef<HTMLDivElement | null>(null);
   const canToggleDebugLogs = import.meta.env.DEV;
   const shouldShowPlaybackReadiness =
     !showDebugLogs && room.mediaSource.type === "local_file" && Boolean(room.transferState);
@@ -145,6 +184,47 @@ export function RoomPanel({
       : Math.round(room.transferState.progress * 100)
     : 0;
   const playbackReadyLabel = room.transferState ? getPlaybackReadyLabel(room.transferState) : "";
+  const visibleChatMessages = useMemo(() => room.chatMessages, [room.chatMessages]);
+
+  useEffect(() => {
+    const chatList = chatMessageListRef.current;
+
+    if (!chatList) {
+      return;
+    }
+
+    chatList.scrollTo({
+      top: chatList.scrollHeight,
+      behavior: "smooth"
+    });
+  }, [visibleChatMessages]);
+
+  useEffect(() => {
+    const playerCard = playerCardRef.current;
+
+    if (!playerCard || isTheaterMode) {
+      setSidebarHeight(null);
+      return;
+    }
+
+    const measuredPlayerCard = playerCard;
+
+    function syncSidebarHeight() {
+      setSidebarHeight(measuredPlayerCard.getBoundingClientRect().height);
+    }
+
+    syncSidebarHeight();
+
+    const resizeObserver = new ResizeObserver(() => {
+      syncSidebarHeight();
+    });
+
+    resizeObserver.observe(measuredPlayerCard);
+
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, [isTheaterMode, shouldShowPlaybackReadiness, showDebugLogs, room.mediaSource.type, visibleChatMessages.length]);
 
   function handleCopyCode() {
     navigator.clipboard.writeText(room.roomId).then(() => {
@@ -171,6 +251,17 @@ export function RoomPanel({
       setLogsCopied(true);
       setTimeout(() => setLogsCopied(false), 2000);
     });
+  }
+
+  function handleSendChatMessage() {
+    const nextMessage = chatDraft.trim();
+
+    if (!nextMessage) {
+      return;
+    }
+
+    onSendChatMessage(nextMessage);
+    setChatDraft("");
   }
 
   const sourceLabel =
@@ -225,7 +316,7 @@ export function RoomPanel({
       </div>
 
       <div className={`room-grid ${isTheaterMode ? "room-grid--theater" : ""}`}>
-        <div className="player-card">
+        <div ref={playerCardRef} className="player-card">
           {room.mediaSource.type === "youtube" ? (
             <YouTubeRoomPlayer
               room={room as RoomState & { mediaSource: YoutubeMediaSource }}
@@ -257,23 +348,8 @@ export function RoomPanel({
             />
           )}
 
-        </div>
-
-        <aside className={`sidebar-card ${isTheaterMode ? "sidebar-card--hidden" : ""}`}>
-          <div>
-            <p className="eyebrow">Participants</p>
-            <ul className="participant-list">
-              {room.participants.map((participant) => (
-                <li key={participant.id}>
-                  <span>{participant.displayName ?? participant.id.slice(0, 6)}</span>
-                  {participant.id === selfId ? <strong>You</strong> : null}
-                </li>
-              ))}
-            </ul>
-          </div>
-
           {shouldShowPlaybackReadiness && room.transferState ? (
-            <div className="playback-readiness-card">
+            <div className="playback-readiness-card playback-readiness-card--below-player">
               <div className="playback-readiness-header">
                 <span className="stat-label">Playback ready</span>
                 <strong>{playbackReadyPercent}%</strong>
@@ -291,9 +367,81 @@ export function RoomPanel({
               <p className="playback-readiness-copy">{playbackReadyLabel}</p>
             </div>
           ) : null}
+        </div>
+
+        <aside
+          className={`sidebar-card ${isTheaterMode ? "sidebar-card--hidden" : ""}`}
+          style={!showDebugLogs && sidebarHeight ? { height: `${sidebarHeight}px`, maxHeight: `${sidebarHeight}px` } : undefined}
+        >
+          {showDebugLogs ? (
+            <div className="sidebar-section">
+              <p className="eyebrow">Participants</p>
+              <ul className="participant-list">
+                {room.participants.map((participant) => (
+                  <li key={participant.id}>
+                    <span>{participant.displayName ?? participant.id.slice(0, 6)}</span>
+                    {participant.id === selfId ? <strong>You</strong> : null}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
+          {!showDebugLogs ? (
+            <div className="chat-panel">
+              <div className="chat-panel-header">
+                <p className="eyebrow">Chat</p>
+                <span>{visibleChatMessages.length} messages</span>
+              </div>
+
+              <div ref={chatMessageListRef} className="chat-message-list" aria-live="polite">
+                {visibleChatMessages.length === 0 ? (
+                  <div className="chat-empty-state">
+                    Messages you send here will appear for everyone in the room.
+                  </div>
+                ) : (
+                  visibleChatMessages.map((message: ChatMessage) => (
+                    <article
+                      key={message.id}
+                      className={getChatMessageClassName(message, selfId)}
+                    >
+                      <div className="chat-message-meta">
+                        <strong className="chat-message-author">
+                          <span>{message.kind === "system" ? "System" : message.senderDisplayName ?? "Guest"}</span>
+                          {isOwnChatMessage(message, selfId) ? <em className="chat-message-you-tag">You</em> : null}
+                        </strong>
+                        <span>{formatChatTimestamp(message.createdAt)}</span>
+                      </div>
+                      <p>{message.text}</p>
+                    </article>
+                  ))
+                )}
+                <div ref={chatMessagesEndRef} />
+              </div>
+
+              <div className="chat-composer">
+                <input
+                  className="chat-composer-input"
+                  value={chatDraft}
+                  onChange={(event) => setChatDraft(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" && !event.shiftKey) {
+                      event.preventDefault();
+                      handleSendChatMessage();
+                    }
+                  }}
+                  placeholder="Message the room"
+                  maxLength={280}
+                />
+                <button className="action-button action-button--chat" type="button" onClick={handleSendChatMessage}>
+                  Send
+                </button>
+              </div>
+            </div>
+          ) : null}
 
           {showDebugLogs ? (
-            <div className="sync-stats">
+            <div className="sync-stats sidebar-section">
               <div>
                 <span className="stat-label">Current time</span>
                 <strong>{room.currentTime.toFixed(1)}s</strong>
