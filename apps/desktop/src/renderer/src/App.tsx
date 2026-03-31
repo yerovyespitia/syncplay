@@ -3,6 +3,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { DesktopApi, PickedLocalFile } from "@syncplay/shared";
 import { parseYouTubeUrl } from "@syncplay/shared";
 
+import appleDarkIcon from "./assets/apple-dark.svg";
+import electronIcon from "./assets/electron.svg";
+import linuxIcon from "./assets/linux.svg";
+import windowsIcon from "./assets/windows.svg";
 import { RoomPanel } from "./components/RoomPanel";
 import { SyncPlayLogo } from "./components/SyncPlayLogo";
 import { useRoomConnection } from "./hooks/useRoomConnection";
@@ -44,6 +48,69 @@ function detectPlatformLabel() {
 function detectElectronVersion() {
   const match = navigator.userAgent.match(/Electron\/([\d.]+)/);
   return match?.[1] ?? "web";
+}
+
+function formatConnectionLabel(status: string) {
+  return status.charAt(0).toUpperCase() + status.slice(1);
+}
+
+function PlatformIcon({ platformLabel }: { platformLabel: string }) {
+  const normalized = platformLabel.toLowerCase();
+  let iconSrc: string | null = null;
+
+  if (normalized === "macos") {
+    iconSrc = appleDarkIcon;
+  } else if (normalized === "windows") {
+    iconSrc = windowsIcon;
+  } else if (normalized === "linux") {
+    iconSrc = linuxIcon;
+  }
+
+  if (!iconSrc) {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <path
+          fill="currentColor"
+          d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm6.93 9h-3.18a15.6 15.6 0 0 0-1.16-5.01A8.03 8.03 0 0 1 18.93 11Zm-6.18-6.93c.89 1.13 1.64 3.02 1.96 5.43h-5.42c.32-2.41 1.07-4.3 1.96-5.43.24-.03.5-.07.75-.07s.51.04.75.07ZM9.41 5.99A15.6 15.6 0 0 0 8.25 11H5.07a8.03 8.03 0 0 1 4.34-5.01ZM4.57 13h3.68c.09 1.83.48 3.57 1.16 5.01A8.03 8.03 0 0 1 4.57 13Zm6.72 6.93c-.89-1.13-1.64-3.02-1.96-5.43h5.42c-.32 2.41-1.07 4.3-1.96 5.43-.24.03-.5.07-.75.07s-.51-.04-.75-.07Zm3.3-1.92A15.6 15.6 0 0 0 15.75 13h3.18a8.03 8.03 0 0 1-4.34 5.01Z"
+        />
+      </svg>
+    );
+  }
+
+  return <img src={iconSrc} alt="" aria-hidden="true" />;
+}
+
+function ConnectionStatusIcon({ status }: { status: string }) {
+  if (status === "connected") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <path
+          fill="currentColor"
+          d="M9.55 18.2 4.8 13.45l1.4-1.4 3.35 3.35 8.25-8.25 1.4 1.4-9.65 9.65Z"
+        />
+      </svg>
+    );
+  }
+
+  if (status === "connecting") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <path
+          fill="currentColor"
+          d="M12 3a1 1 0 0 1 1 1v1.05a7 7 0 0 1 5.95 5.95H20a1 1 0 1 1 0 2h-2a1 1 0 0 1-1-1 5 5 0 1 0-1.46 3.54 1 1 0 1 1 1.42 1.42A7 7 0 1 1 12 5V4a1 1 0 0 1 1-1Z"
+        />
+      </svg>
+    );
+  }
+
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path
+        fill="currentColor"
+        d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2Zm4.7 13.3-1.4 1.4-3.3-3.3-3.3 3.3-1.4-1.4 3.3-3.3-3.3-3.3 1.4-1.4 3.3 3.3 3.3-3.3 1.4 1.4-3.3 3.3 3.3 3.3Z"
+      />
+    </svg>
+  );
 }
 
 const fallbackDesktopApi: DesktopApi = {
@@ -274,9 +341,18 @@ export default function App() {
               </div>
             </div>
             <div className="hero-meta">
-              <span className={`pill pill-${connectionStatus}`}>{connectionStatus}</span>
-              <span className="pill pill-info">{platformLabel}</span>
-              <span className="pill pill-info">Electron {electronVersionLabel}</span>
+              <span className={`pill pill-${connectionStatus}`}>
+                <ConnectionStatusIcon status={connectionStatus} />
+                {formatConnectionLabel(connectionStatus)}
+              </span>
+              <span className="pill pill-info">
+                <PlatformIcon platformLabel={platformLabel} />
+                {platformLabel}
+              </span>
+              <span className="pill pill-info">
+                <img src={electronIcon} alt="" aria-hidden="true" />
+                {electronVersionLabel}
+              </span>
               {hasDesktopBridge && isDev ? (
                 <button
                   className="desktop-icon-button"

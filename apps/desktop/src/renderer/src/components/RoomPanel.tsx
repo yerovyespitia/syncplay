@@ -64,6 +64,39 @@ interface RoomPanelProps {
   onTransferState: (transferState: TransferState) => void;
 }
 
+function CodeIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path
+        fill="currentColor"
+        d="M8.7 7.3a1 1 0 0 1 0 1.4L5.41 12l3.3 3.3a1 1 0 1 1-1.42 1.4l-4-4a1 1 0 0 1 0-1.4l4-4a1 1 0 0 1 1.41 0Zm6.6 0a1 1 0 0 1 1.41 0l4 4a1 1 0 0 1 0 1.4l-4 4a1 1 0 1 1-1.41-1.4l3.29-3.3-3.3-3.3a1 1 0 0 1 0-1.4Z"
+      />
+    </svg>
+  );
+}
+
+function RefreshIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path
+        fill="currentColor"
+        d="M12 4a8 8 0 0 1 7.75 6h-1.68a1 1 0 1 0 0 2H22a1 1 0 0 0 1-1V7.07a1 1 0 1 0-2 0v1.18A10 10 0 1 0 22 12a1 1 0 1 0-2 0 8 8 0 1 1-8-8Z"
+      />
+    </svg>
+  );
+}
+
+function LeaveIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path
+        fill="currentColor"
+        d="M10 4a1 1 0 0 1 0 2H6v12h4a1 1 0 1 1 0 2H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h5Zm5.3 3.3a1 1 0 0 1 1.4 0l3.99 4a1 1 0 0 1 0 1.4l-4 4a1 1 0 1 1-1.4-1.4l2.3-2.3H9a1 1 0 1 1 0-2h8.59l-2.3-2.3a1 1 0 0 1 0-1.4Z"
+      />
+    </svg>
+  );
+}
+
 function getPlaybackReadyLabel(transferState: TransferState) {
   if (transferState.phase === "failed") {
     return "Playback unavailable";
@@ -176,13 +209,16 @@ export function RoomPanel({
               onClick={() => setShowDebugLogs((current) => !current)}
               type="button"
             >
+              <CodeIcon />
               Dev mode
             </button>
           ) : null}
           <button className="action-button action-button--sync" onClick={onRequestSync} type="button">
+            <RefreshIcon />
             Resync
           </button>
           <button className="action-button action-button--leave" onClick={onLeave} type="button">
+            <LeaveIcon />
             Leave room
           </button>
         </div>
