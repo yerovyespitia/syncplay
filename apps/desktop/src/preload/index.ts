@@ -6,6 +6,11 @@ contextBridge.exposeInMainWorld("syncplayDesktop", {
   openDesktopWindow: () => ipcRenderer.invoke("syncplay:open-desktop-window"),
   pickLocalFile: () => ipcRenderer.invoke("syncplay:pick-local-file"),
   pickLocalFileByPath: (filePath: string) => ipcRenderer.invoke("syncplay:pick-local-file-by-path", filePath),
+  resolveMagnetLink: (magnetUri: string) => ipcRenderer.invoke("syncplay:resolve-magnet-link", magnetUri),
+  selectTorrentFile: (sessionId: string, fileIndex: number) =>
+    ipcRenderer.invoke("syncplay:select-torrent-file", sessionId, fileIndex),
+  getTorrentSessionStatus: (sessionId: string) => ipcRenderer.invoke("syncplay:get-torrent-session-status", sessionId),
+  disposeTorrentSession: (sessionId: string) => ipcRenderer.invoke("syncplay:dispose-torrent-session", sessionId),
   readLocalFile: async (fileId: string) => new Uint8Array(await ipcRenderer.invoke("syncplay:read-local-file", fileId)),
   readLocalFileChunk: async (fileId: string, offset: number, length: number) =>
     new Uint8Array(await ipcRenderer.invoke("syncplay:read-local-file-chunk", fileId, offset, length)),

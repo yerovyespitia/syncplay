@@ -7,7 +7,7 @@ declare global {
     syncplayDesktop: DesktopApi;
     __syncplayTest?: {
       getState: () => unknown;
-      selectSourceOption: (sourceOption: "youtube" | "local_file") => void;
+      selectSourceOption: (sourceOption: "youtube" | "local_file" | "torrent_magnet") => void;
       selectLocalFileByPath: (filePath: string) => Promise<unknown>;
       joinRoomByCode: (roomCode: string) => void;
       createCurrentRoom: () => void;

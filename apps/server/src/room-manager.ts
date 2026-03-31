@@ -38,7 +38,7 @@ export class RoomManager {
       chatMessages: [],
       hostParticipantId: participant.id,
       transferState:
-        mediaSource.type === "local_file"
+        mediaSource.type === "local_file" || mediaSource.type === "torrent_magnet"
           ? {
               phase: "waiting_host",
               bytesReceived: 0,
@@ -73,7 +73,10 @@ export class RoomManager {
       };
     }
 
-    if (record.state.mediaSource.type === "local_file" && record.participants.size >= 2) {
+    if (
+      (record.state.mediaSource.type === "local_file" || record.state.mediaSource.type === "torrent_magnet") &&
+      record.participants.size >= 2
+    ) {
       return {
         ok: false as const,
         reason: "Local file rooms support only two participants."
@@ -84,7 +87,7 @@ export class RoomManager {
     record.state.participants = Array.from(record.participants.values());
     record.state.updatedAt = Date.now();
 
-    if (record.state.mediaSource.type === "local_file") {
+    if (record.state.mediaSource.type === "local_file" || record.state.mediaSource.type === "torrent_magnet") {
       record.state.transferState = {
         phase: "connecting_peer",
         bytesReceived: 0,

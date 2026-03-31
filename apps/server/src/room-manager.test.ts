@@ -27,6 +27,16 @@ const localFileSource: MediaSource = {
   mimeType: "video/mp4"
 };
 
+const torrentSource: MediaSource = {
+  type: "torrent_magnet",
+  magnetUri: "magnet:?xt=urn:btih:abcdef1234567890",
+  infoHash: "abcdef1234567890",
+  mediaId: "media-2",
+  fileName: "movie.mp4",
+  fileSize: 1024,
+  mimeType: "video/mp4"
+};
+
 describe("RoomManager", () => {
   test("creates and joins rooms", () => {
     const manager = new RoomManager();
@@ -76,6 +86,29 @@ describe("RoomManager", () => {
   test("limits local file rooms to two participants", () => {
     const manager = new RoomManager();
     const created = manager.createRoom(localFileSource, participantA);
+    const joined = manager.joinRoom(created.room.roomId, participantB);
+
+    expect(joined.ok).toBeTrue();
+
+    const thirdJoin = manager.joinRoom(created.room.roomId, {
+      id: "c",
+      connectedAt: 3
+    });
+
+    expect(thirdJoin.ok).toBeFalse();
+  });
+
+  test("initializes transfer state for torrent magnet rooms", () => {
+    const manager = new RoomManager();
+    const created = manager.createRoom(torrentSource, participantA);
+
+    expect(created.room.transferState?.phase).toBe("waiting_host");
+    expect(created.room.transferState?.bytesTotal).toBe(torrentSource.fileSize);
+  });
+
+  test("limits torrent magnet rooms to two participants", () => {
+    const manager = new RoomManager();
+    const created = manager.createRoom(torrentSource, participantA);
     const joined = manager.joinRoom(created.room.roomId, participantB);
 
     expect(joined.ok).toBeTrue();

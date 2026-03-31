@@ -39,8 +39,7 @@ export interface YoutubeMediaSource {
   videoId: string;
 }
 
-export interface LocalFileMediaSource {
-  type: "local_file";
+export interface HostedFileMediaSourceBase {
   mediaId: string;
   fileName: string;
   fileSize: number;
@@ -48,7 +47,19 @@ export interface LocalFileMediaSource {
   duration?: number;
 }
 
-export type MediaSource = YoutubeMediaSource | LocalFileMediaSource;
+export interface LocalFileMediaSource extends HostedFileMediaSourceBase {
+  type: "local_file";
+}
+
+export interface TorrentMagnetMediaSource extends HostedFileMediaSourceBase {
+  type: "torrent_magnet";
+  magnetUri: string;
+  infoHash: string;
+}
+
+export type HostedFileMediaSource = LocalFileMediaSource | TorrentMagnetMediaSource;
+
+export type MediaSource = YoutubeMediaSource | HostedFileMediaSource;
 
 export interface TransferState {
   phase: TransferPhase;
@@ -279,10 +290,37 @@ export interface ClientEnvelope<TType extends ClientEvent["type"] = ClientEvent[
   payload: Extract<ClientEvent, { type: TType }>["payload"];
 }
 
-export interface PickedLocalFile extends LocalFileMediaSource {
+export type PickedLocalFile = HostedFileMediaSource & {
   fileId: string;
   fileUrl: string;
   streamUrl: string;
+};
+
+export type TorrentSessionPhase = "resolving_metadata" | "selecting_file" | "ready" | "downloading" | "failed";
+
+export interface TorrentMediaFile {
+  index: number;
+  name: string;
+  path: string;
+  size: number;
+  mimeType: string;
+}
+
+export interface TorrentSessionSummary {
+  sessionId: string;
+  magnetUri: string;
+  infoHash: string;
+  displayName: string;
+  phase: TorrentSessionPhase;
+  files: TorrentMediaFile[];
+  selectedFileIndex?: number;
+  progress: number;
+  downloadedBytes: number;
+  totalBytes: number;
+  downloadSpeed: number;
+  uploadSpeed: number;
+  peerCount: number;
+  message?: string;
 }
 
 export interface TempMediaCacheMetadata {
@@ -314,6 +352,10 @@ export interface DesktopApi {
   openDesktopWindow(): Promise<void>;
   pickLocalFile(): Promise<PickedLocalFile | null>;
   pickLocalFileByPath(filePath: string): Promise<PickedLocalFile | null>;
+  resolveMagnetLink(magnetUri: string): Promise<TorrentSessionSummary>;
+  selectTorrentFile(sessionId: string, fileIndex: number): Promise<PickedLocalFile>;
+  getTorrentSessionStatus(sessionId: string): Promise<TorrentSessionSummary | null>;
+  disposeTorrentSession(sessionId: string): Promise<void>;
   readLocalFile(fileId: string): Promise<Uint8Array>;
   readLocalFileChunk(fileId: string, offset: number, length: number): Promise<Uint8Array>;
   createTempMediaCache(mediaId: string, metadata: TempMediaCacheMetadata): Promise<TempMediaCacheHandle>;

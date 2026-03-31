@@ -113,6 +113,29 @@ describe("syncplay server chat", () => {
     await expectNoEvent(hostB, "chat_message_received", 150);
     expect(roomB.payload.room.roomId).not.toBe(roomA.payload.room.roomId);
   });
+
+  test("rejects invalid torrent magnet rooms", async () => {
+    const host = await openSocket(server.port, sockets);
+
+    host.send({
+      type: "create_room",
+      payload: {
+        mediaSource: {
+          type: "torrent_magnet",
+          magnetUri: "",
+          infoHash: "",
+          mediaId: "media-1",
+          fileName: "",
+          fileSize: 0,
+          mimeType: "video/mp4"
+        },
+        displayName: "Alice"
+      }
+    });
+
+    const errorEvent = await host.nextEvent("server_error");
+    expect(errorEvent.payload.message).toBe("Missing torrent magnet metadata.");
+  });
 });
 
 async function createRoom(socket: TestSocket, displayName: string) {

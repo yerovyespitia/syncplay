@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import type {
   ChatMessage,
-  LocalFileMediaSource,
+  HostedFileMediaSource,
   PickedLocalFile,
   RoomState,
   TransferState,
@@ -177,7 +177,9 @@ export function RoomPanel({
   const chatMessagesEndRef = useRef<HTMLDivElement | null>(null);
   const canToggleDebugLogs = import.meta.env.DEV;
   const shouldShowPlaybackReadiness =
-    !showDebugLogs && room.mediaSource.type === "local_file" && Boolean(room.transferState);
+    !showDebugLogs &&
+    (room.mediaSource.type === "local_file" || room.mediaSource.type === "torrent_magnet") &&
+    Boolean(room.transferState);
   const playbackReadyPercent = room.transferState
     ? room.transferState.isPlaybackReady
       ? 100
@@ -275,7 +277,7 @@ export function RoomPanel({
         </svg>
       </span>
     ) : (
-      `${room.mediaSource.fileName} (local file)`
+      `${room.mediaSource.fileName} (${room.mediaSource.type === "torrent_magnet" ? "magnet link" : "local file"})`
     );
 
   return (
@@ -328,7 +330,7 @@ export function RoomPanel({
             />
           ) : (
             <LocalFileRoomPlayer
-              room={room as RoomState & { mediaSource: LocalFileMediaSource }}
+              room={room as RoomState & { mediaSource: HostedFileMediaSource }}
               selfId={selfId}
               localFile={localFile}
               isTheaterMode={isTheaterMode}

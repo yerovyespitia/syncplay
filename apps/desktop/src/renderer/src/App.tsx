@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import type { DesktopApi, PickedLocalFile } from "@syncplay/shared";
+import type { DesktopApi, PickedLocalFile, TorrentSessionSummary } from "@syncplay/shared";
 import { parseYouTubeUrl } from "@syncplay/shared";
 
 import appleDarkIcon from "./assets/apple-dark.svg";
@@ -11,7 +11,25 @@ import { RoomPanel } from "./components/RoomPanel";
 import { SyncPlayLogo } from "./components/SyncPlayLogo";
 import { useRoomConnection } from "./hooks/useRoomConnection";
 
-type SourceOption = "youtube" | "local_file";
+type SourceOption = "youtube" | "local_file" | "torrent_magnet";
+
+function createFallbackTorrentSession(magnetUri: string, message: string): TorrentSessionSummary {
+  return {
+    sessionId: "",
+    magnetUri,
+    infoHash: "",
+    displayName: "Unavailable",
+    phase: "failed",
+    files: [],
+    progress: 0,
+    downloadedBytes: 0,
+    totalBytes: 0,
+    downloadSpeed: 0,
+    uploadSpeed: 0,
+    peerCount: 0,
+    message
+  };
+}
 
 function formatPlatformLabel(value: string) {
   const normalized = value.toLowerCase();
@@ -119,6 +137,13 @@ const fallbackDesktopApi: DesktopApi = {
   openDesktopWindow: async () => undefined,
   pickLocalFile: async () => null,
   pickLocalFileByPath: async () => null,
+  resolveMagnetLink: async (magnetUri: string) =>
+    createFallbackTorrentSession(magnetUri, "Magnet links are only available in the desktop app."),
+  selectTorrentFile: async () => {
+    throw new Error("Magnet links are only available in the desktop app.");
+  },
+  getTorrentSessionStatus: async () => null,
+  disposeTorrentSession: async () => undefined,
   readLocalFile: async () => new Uint8Array(),
   readLocalFileChunk: async () => new Uint8Array(),
   createTempMediaCache: async () => ({
@@ -148,11 +173,15 @@ export default function App() {
   const electronVersionLabel = desktopApi.electronVersion || detectElectronVersion();
   const [sourceOption, setSourceOption] = useState<SourceOption>("youtube");
   const [videoUrl, setVideoUrl] = useState("");
+  const [magnetLink, setMagnetLink] = useState("");
   const [roomCode, setRoomCode] = useState("");
   const [selectedLocalFile, setSelectedLocalFile] = useState<PickedLocalFile | null>(null);
   const [selectedPlaybackFile, setSelectedPlaybackFile] = useState<PickedLocalFile | File | null>(null);
+  const [torrentSession, setTorrentSession] = useState<TorrentSessionSummary | null>(null);
+  const [isResolvingMagnet, setIsResolvingMagnet] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const activeTorrentSessionIdRef = useRef<string | null>(null);
   const {
     connectionStatus,
     room,
@@ -180,11 +209,46 @@ export default function App() {
   } = useRoomConnection();
   const shouldShowDesktopBridgeWarning =
     !hasDesktopBridge &&
-    (sourceOption === "local_file" || (room !== null && room.mediaSource.type === "local_file"));
+    (sourceOption === "local_file" ||
+      sourceOption === "torrent_magnet" ||
+      (room !== null && (room.mediaSource.type === "local_file" || room.mediaSource.type === "torrent_magnet")));
 
   const parsedVideo = useMemo(() => parseYouTubeUrl(videoUrl), [videoUrl]);
-  const canCreateRoom = sourceOption === "youtube" ? Boolean(parsedVideo) : Boolean(selectedLocalFile);
+  const canCreateRoom =
+    sourceOption === "youtube"
+      ? Boolean(parsedVideo)
+      : sourceOption === "torrent_magnet"
+        ? selectedLocalFile?.type === "torrent_magnet"
+        : selectedLocalFile?.type === "local_file";
   const canJoinRoom = Boolean(roomCode.trim());
+
+  async function disposeActiveTorrentSession() {
+    const activeSessionId = activeTorrentSessionIdRef.current;
+
+    activeTorrentSessionIdRef.current = null;
+    setTorrentSession(null);
+
+    if (!activeSessionId) {
+      return;
+    }
+
+    try {
+      await desktopApi.disposeTorrentSession(activeSessionId);
+    } catch {
+      // Best-effort cleanup for abandoned sessions.
+    }
+  }
+
+  async function switchSourceOption(nextSourceOption: SourceOption) {
+    if (nextSourceOption !== "torrent_magnet") {
+      await disposeActiveTorrentSession();
+    }
+
+    setSourceOption(nextSourceOption);
+    setSelectedLocalFile(null);
+    setSelectedPlaybackFile(null);
+    setLocalError(null);
+  }
 
   useEffect(() => {
     if (!isDev) {
@@ -198,6 +262,8 @@ export default function App() {
         selfId,
         sourceOption,
         roomCode,
+        magnetLink,
+        torrentSession,
         hasSelectedLocalFile: Boolean(selectedLocalFile),
         selectedLocalFile,
         debugEntries,
@@ -206,7 +272,7 @@ export default function App() {
         lastActionLabel
       }),
       selectSourceOption: (nextSourceOption: SourceOption) => {
-        setSourceOption(nextSourceOption);
+        void switchSourceOption(nextSourceOption);
       },
       selectLocalFileByPath: async (filePath: string) => {
         const pickedFile = await desktopApi.pickLocalFileByPath(filePath);
@@ -240,15 +306,44 @@ export default function App() {
     joinRoom,
     lastActionLabel,
     localError,
+    magnetLink,
     debugEntries,
     room,
     roomCode,
     selectedLocalFile,
     selfId,
-    sourceOption
+    sourceOption,
+    torrentSession
   ]);
 
+  useEffect(() => {
+    if (!torrentSession || !torrentSession.sessionId) {
+      return;
+    }
+
+    activeTorrentSessionIdRef.current = torrentSession.sessionId;
+
+    const intervalId = window.setInterval(() => {
+      void desktopApi.getTorrentSessionStatus(torrentSession.sessionId).then((nextStatus) => {
+        if (nextStatus) {
+          setTorrentSession(nextStatus);
+        }
+      });
+    }, 1500);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [desktopApi, torrentSession]);
+
+  useEffect(() => {
+    return () => {
+      void disposeActiveTorrentSession();
+    };
+  }, []);
+
   async function handlePickLocalFile() {
+    await disposeActiveTorrentSession();
     if (window.syncplayDesktop) {
       const pickedFile = await desktopApi.pickLocalFile();
 
@@ -288,6 +383,66 @@ export default function App() {
     setLocalError(null);
   }
 
+  async function handleResolveMagnet() {
+    if (!magnetLink.trim()) {
+      setLocalError("Paste a magnet link first.");
+      return;
+    }
+
+    await disposeActiveTorrentSession();
+    setSelectedLocalFile(null);
+    setSelectedPlaybackFile(null);
+    setIsResolvingMagnet(true);
+
+    try {
+      const nextSession = await desktopApi.resolveMagnetLink(magnetLink.trim());
+      setTorrentSession(nextSession);
+      activeTorrentSessionIdRef.current = nextSession.sessionId || null;
+
+      if (nextSession.phase === "failed") {
+        setLocalError(nextSession.message ?? "Could not resolve magnet link.");
+        return;
+      }
+
+      if (nextSession.files.length === 1) {
+        const autoSelectedFile = await desktopApi.selectTorrentFile(nextSession.sessionId, nextSession.files[0].index);
+        setSelectedLocalFile(autoSelectedFile);
+        setSelectedPlaybackFile(autoSelectedFile);
+        const latestStatus = await desktopApi.getTorrentSessionStatus(nextSession.sessionId);
+        if (latestStatus) {
+          setTorrentSession(latestStatus);
+        }
+        setLocalError(null);
+        return;
+      }
+
+      setLocalError(null);
+    } catch (resolveError) {
+      setLocalError(resolveError instanceof Error ? resolveError.message : "Could not resolve magnet link.");
+    } finally {
+      setIsResolvingMagnet(false);
+    }
+  }
+
+  async function handleSelectTorrentFile(fileIndex: number) {
+    if (!torrentSession?.sessionId) {
+      return;
+    }
+
+    try {
+      const pickedFile = await desktopApi.selectTorrentFile(torrentSession.sessionId, fileIndex);
+      setSelectedLocalFile(pickedFile);
+      setSelectedPlaybackFile(pickedFile);
+      const latestStatus = await desktopApi.getTorrentSessionStatus(torrentSession.sessionId);
+      if (latestStatus) {
+        setTorrentSession(latestStatus);
+      }
+      setLocalError(null);
+    } catch (selectionError) {
+      setLocalError(selectionError instanceof Error ? selectionError.message : "Could not open torrent video.");
+    }
+  }
+
   function handleCreateRoom() {
     if (sourceOption === "youtube") {
       if (!parsedVideo) {
@@ -298,6 +453,25 @@ export default function App() {
       createRoom({
         type: "youtube",
         videoId: parsedVideo.videoId
+      });
+      setLocalError(null);
+      return;
+    }
+
+    if (sourceOption === "torrent_magnet") {
+      if (!selectedLocalFile || selectedLocalFile.type !== "torrent_magnet") {
+        setLocalError("Resolve the magnet link and choose a video file first.");
+        return;
+      }
+
+      createRoom({
+        type: "torrent_magnet",
+        magnetUri: selectedLocalFile.magnetUri,
+        infoHash: selectedLocalFile.infoHash,
+        mediaId: selectedLocalFile.mediaId,
+        fileName: selectedLocalFile.fileName,
+        fileSize: selectedLocalFile.fileSize,
+        mimeType: selectedLocalFile.mimeType
       });
       setLocalError(null);
       return;
@@ -326,6 +500,33 @@ export default function App() {
 
     setLocalError(null);
     joinRoom(roomCode);
+  }
+
+  async function handleLeaveRoom() {
+    leaveRoom();
+    await disposeActiveTorrentSession();
+    setSelectedLocalFile(null);
+    setSelectedPlaybackFile(null);
+  }
+
+  function renderTorrentStatus() {
+    if (!torrentSession) {
+      return "Paste a magnet link, resolve metadata, then choose the video file to share.";
+    }
+
+    if (torrentSession.phase === "failed") {
+      return torrentSession.message ?? "Could not resolve torrent metadata.";
+    }
+
+    if (torrentSession.phase === "selecting_file") {
+      return `${torrentSession.files.length} playable video file(s) found. Choose one to create the room.`;
+    }
+
+    if (torrentSession.selectedFileIndex !== undefined) {
+      return `Torrent ready. ${Math.round(torrentSession.progress * 100)}% downloaded from ${torrentSession.peerCount} peer(s).`;
+    }
+
+    return "Fetching torrent metadata.";
   }
 
   return (
@@ -406,17 +607,30 @@ export default function App() {
               <div className="source-selector">
                 <button
                   className={`source-chip ${sourceOption === "youtube" ? "source-chip--active" : ""}`}
-                  onClick={() => setSourceOption("youtube")}
+                  onClick={() => {
+                    void switchSourceOption("youtube");
+                  }}
                   type="button"
                 >
                   YouTube
                 </button>
                 <button
                   className={`source-chip ${sourceOption === "local_file" ? "source-chip--active" : ""}`}
-                  onClick={() => setSourceOption("local_file")}
+                  onClick={() => {
+                    void switchSourceOption("local_file");
+                  }}
                   type="button"
                 >
                   Local File
+                </button>
+                <button
+                  className={`source-chip ${sourceOption === "torrent_magnet" ? "source-chip--active" : ""}`}
+                  onClick={() => {
+                    void switchSourceOption("torrent_magnet");
+                  }}
+                  type="button"
+                >
+                  Magnet Link
                 </button>
               </div>
 
@@ -436,7 +650,7 @@ export default function App() {
                     {parsedVideo ? `Detected video id: ${parsedVideo.videoId}` : "Supports watch, short and embed URLs."}
                   </p>
                 </>
-              ) : (
+              ) : sourceOption === "local_file" ? (
                 <>
                   <label className="input-label" htmlFor="local-file">
                     Local video
@@ -460,6 +674,64 @@ export default function App() {
                   </div>
                   <p className="helper-text">
                     Local-file rooms work for 2 people. The host shares the video directly to the guest.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <label className="input-label" htmlFor="magnet-link">
+                    Magnet link
+                  </label>
+                  <input
+                    id="magnet-link"
+                    className="text-input"
+                    value={magnetLink}
+                    onChange={(event) => {
+                      if (torrentSession) {
+                        void disposeActiveTorrentSession();
+                        setSelectedLocalFile(null);
+                        setSelectedPlaybackFile(null);
+                      }
+                      setMagnetLink(event.target.value);
+                      setLocalError(null);
+                    }}
+                    placeholder="magnet:?xt=urn:btih:..."
+                  />
+                  <div className="local-file-picker">
+                    <button className="secondary-button" type="button" onClick={handleResolveMagnet} disabled={isResolvingMagnet}>
+                      {isResolvingMagnet ? "Resolving..." : "Resolve magnet"}
+                    </button>
+                    <span className="helper-text">{renderTorrentStatus()}</span>
+                  </div>
+                  {torrentSession && torrentSession.files.length > 1 ? (
+                    <>
+                      <label className="input-label" htmlFor="torrent-file">
+                        Video file
+                      </label>
+                      <select
+                        id="torrent-file"
+                        className="text-input"
+                        value={selectedLocalFile?.type === "torrent_magnet" ? String(torrentSession.selectedFileIndex ?? "") : ""}
+                        onChange={(event) => {
+                          const nextIndex = Number(event.target.value);
+                          if (Number.isFinite(nextIndex)) {
+                            void handleSelectTorrentFile(nextIndex);
+                          }
+                        }}
+                      >
+                        <option value="" disabled>
+                          Choose a video file
+                        </option>
+                        {torrentSession.files.map((file) => (
+                          <option key={file.index} value={file.index}>
+                            {file.name} ({Math.round(file.size / 1024 / 1024)} MB)
+                          </option>
+                        ))}
+                      </select>
+                    </>
+                  ) : null}
+                  <p className="helper-text">
+                    Magnet-link rooms also work for 2 people. The host downloads the torrent locally and shares the selected
+                    video directly to the guest.
                   </p>
                 </>
               )}
@@ -499,7 +771,9 @@ export default function App() {
           debugEntries={debugEntries}
           peerSignal={peerSignal}
           lastActionLabel={lastActionLabel}
-          onLeave={leaveRoom}
+          onLeave={() => {
+            void handleLeaveRoom();
+          }}
           onRequestSync={requestSync}
           onSendChatMessage={sendChatMessage}
           onPlay={sendPlay}

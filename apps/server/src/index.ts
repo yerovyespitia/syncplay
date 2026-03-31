@@ -26,6 +26,23 @@ const clientEventTypes = new Set<ClientEvent["type"]>([
   "peer_transfer_state"
 ]);
 
+function hasValidTorrentMediaSource(
+  mediaSource: Extract<ClientEvent, { type: "create_room" }>["payload"]["mediaSource"]
+) {
+  if (mediaSource.type !== "torrent_magnet") {
+    return true;
+  }
+
+  return Boolean(
+    mediaSource.magnetUri &&
+      mediaSource.infoHash &&
+      mediaSource.mediaId &&
+      mediaSource.fileName &&
+      Number.isFinite(mediaSource.fileSize) &&
+      mediaSource.fileSize > 0
+  );
+}
+
 export function createSyncPlayServer(port = Number(process.env.PORT ?? 8787)) {
   const roomManager = new RoomManager();
   const roomMembers = new Map<string, Set<Bun.ServerWebSocket<SocketData>>>();
@@ -114,6 +131,11 @@ export function createSyncPlayServer(port = Number(process.env.PORT ?? 8787)) {
       case "create_room": {
         if (event.payload.mediaSource.type === "youtube" && !event.payload.mediaSource.videoId) {
           sendError(ws, "Missing YouTube video id.");
+          return;
+        }
+
+        if (!hasValidTorrentMediaSource(event.payload.mediaSource)) {
+          sendError(ws, "Missing torrent magnet metadata.");
           return;
         }
 

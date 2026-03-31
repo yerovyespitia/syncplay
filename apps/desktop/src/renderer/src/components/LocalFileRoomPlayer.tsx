@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import type { ByteRange, LocalFileMediaSource, PickedLocalFile, RangeRequestReason, RoomState, TransferState } from "@syncplay/shared";
+import type { ByteRange, HostedFileMediaSource, PickedLocalFile, RangeRequestReason, RoomState, TransferState } from "@syncplay/shared";
 
 type RemotePlaybackCommand =
   | {
@@ -41,7 +41,7 @@ type PeerSignal =
     };
 
 interface LocalFileRoomPlayerProps {
-  room: RoomState & { mediaSource: LocalFileMediaSource };
+  room: RoomState & { mediaSource: HostedFileMediaSource };
   selfId: string | null;
   localFile: PickedLocalFile | File | null;
   isTheaterMode: boolean;
@@ -73,6 +73,7 @@ const DATA_CHANNEL_HIGH_WATER_MARK = 4 * 1024 * 1024;
 const DATA_CHANNEL_LOW_WATER_MARK = 512 * 1024;
 const ICE_SERVERS: RTCIceServer[] = [{ urls: "stun:stun.l.google.com:19302" }];
 const CONTROLS_IDLE_DELAY_MS = 3000;
+const MEDIA_TITLE_MAX_LENGTH = 50;
 
 type PeerControlMessage =
   | {
@@ -138,7 +139,13 @@ const fallbackDesktopApi = {
 
 function formatMediaTitle(fileName: string) {
   const withoutExtension = fileName.replace(/\.[^/.]+$/, "");
-  return withoutExtension.replace(/[_-]+/g, " ").trim() || fileName;
+  const normalizedTitle = withoutExtension.replace(/[_-]+/g, " ").trim() || fileName;
+
+  if (normalizedTitle.length <= MEDIA_TITLE_MAX_LENGTH) {
+    return normalizedTitle;
+  }
+
+  return `${normalizedTitle.slice(0, MEDIA_TITLE_MAX_LENGTH)}...`;
 }
 
 function isEditableTarget(target: EventTarget | null) {

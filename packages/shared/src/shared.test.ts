@@ -49,4 +49,18 @@ describe("media sources", () => {
 
     expect(source.type).toBe("local_file");
   });
+
+  test("supports torrent magnet source shape", () => {
+    const source: MediaSource = {
+      type: "torrent_magnet",
+      magnetUri: "magnet:?xt=urn:btih:abcdef",
+      infoHash: "abcdef",
+      mediaId: "media-2",
+      fileName: "movie.mp4",
+      fileSize: 4096,
+      mimeType: "video/mp4"
+    };
+
+    expect(source.type).toBe("torrent_magnet");
+  });
 });
