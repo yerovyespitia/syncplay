@@ -45,6 +45,7 @@ interface LocalFileRoomPlayerProps {
   selfId: string | null;
   localFile: PickedLocalFile | File | null;
   isTheaterMode: boolean;
+  showDebugInfo?: boolean;
   remoteCommand: RemotePlaybackCommand | null;
   peerSignal: PeerSignal | null;
   onDebug?: (entry: { scope: "local"; message: string; details?: string }) => void;
@@ -140,6 +141,15 @@ function formatMediaTitle(fileName: string) {
   return withoutExtension.replace(/[_-]+/g, " ").trim() || fileName;
 }
 
+function isEditableTarget(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+
+  const tagName = target.tagName;
+  return target.isContentEditable || tagName === "INPUT" || tagName === "TEXTAREA" || tagName === "SELECT";
+}
+
 function PlayIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
@@ -152,6 +162,34 @@ function PauseIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
       <path fill="currentColor" d="M7 5.5A1.5 1.5 0 0 1 8.5 4h1A1.5 1.5 0 0 1 11 5.5v13A1.5 1.5 0 0 1 9.5 20h-1A1.5 1.5 0 0 1 7 18.5v-13Zm6 0A1.5 1.5 0 0 1 14.5 4h1A1.5 1.5 0 0 1 17 5.5v13a1.5 1.5 0 0 1-1.5 1.5h-1A1.5 1.5 0 0 1 13 18.5v-13Z" />
+    </svg>
+  );
+}
+
+function Seek10Icon({ mirrored = false }: { mirrored?: boolean }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+      focusable="false"
+      style={mirrored ? { transform: "scaleX(-1)" } : undefined}
+    >
+      <path
+        d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M3 3v5h5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }
@@ -205,6 +243,7 @@ export function LocalFileRoomPlayer({
   selfId,
   localFile,
   isTheaterMode,
+  showDebugInfo = false,
   remoteCommand,
   peerSignal,
   onDebug,
@@ -331,6 +370,62 @@ export function LocalFileRoomPlayer({
       }
     };
   }, [isPlaying, mediaUrl]);
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (!mediaUrl || event.repeat || event.metaKey || event.ctrlKey || event.altKey || isEditableTarget(event.target)) {
+        return;
+      }
+
+      const key = event.key.toLowerCase();
+
+      if (key === " " || key === "k") {
+        event.preventDefault();
+        revealControls();
+        togglePlayback();
+        return;
+      }
+
+      if (key === "m") {
+        event.preventDefault();
+        revealControls();
+        toggleMute();
+        return;
+      }
+
+      if (key === "t") {
+        event.preventDefault();
+        revealControls();
+        onTheaterModeChange(!isTheaterMode);
+        return;
+      }
+
+      if (key === "f") {
+        event.preventDefault();
+        revealControls();
+        void toggleFullscreen();
+        return;
+      }
+
+      if (event.key === "ArrowRight") {
+        event.preventDefault();
+        revealControls();
+        seekBy(10);
+        return;
+      }
+
+      if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        revealControls();
+        seekBy(-10);
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isTheaterMode, mediaUrl]);
 
   useEffect(() => {
     if (isHost) {
@@ -1324,6 +1419,25 @@ export function LocalFileRoomPlayer({
     video.pause();
   }
 
+  function seekBy(offsetSeconds: number) {
+    const video = videoRef.current;
+
+    if (!video || !mediaUrl) {
+      return;
+    }
+
+    const videoDuration = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : durationRef.current;
+    const maxTime = Number.isFinite(videoDuration) && videoDuration > 0 ? videoDuration : Math.max(video.currentTime + offsetSeconds, 0);
+    const nextTime = Math.min(Math.max(video.currentTime + offsetSeconds, 0), maxTime);
+
+    if (Math.abs(nextTime - video.currentTime) < 0.01) {
+      return;
+    }
+
+    video.currentTime = nextTime;
+    setCurrentTime(nextTime);
+  }
+
   function handleTimelineInput(event: React.ChangeEvent<HTMLInputElement>) {
     const video = videoRef.current;
 
@@ -1442,10 +1556,55 @@ export function LocalFileRoomPlayer({
             void toggleFullscreen();
           }}
         />
-        {mediaUrl && !isPlaying ? (
-          <button className="local-player-center-action" type="button" onClick={togglePlayback} aria-label="Play video">
-            <PlayIcon />
-          </button>
+        {mediaUrl ? (
+          <div
+            className={`local-player-center-controls ${
+              isPointerActive ? "local-player-center-controls--visible" : "local-player-center-controls--hidden"
+            }`}
+          >
+            <button
+              className="local-player-center-action local-player-center-action--seek"
+              type="button"
+              onClick={() => {
+                revealControls();
+                seekBy(-10);
+              }}
+              aria-label="Back 10 seconds"
+              title="Back 10 seconds (Left Arrow)"
+            >
+              <span className="local-player-seek-content">
+                <Seek10Icon />
+                <span className="local-player-seek-label">10</span>
+              </span>
+            </button>
+            <button
+              className="local-player-center-action"
+              type="button"
+              onClick={() => {
+                revealControls();
+                togglePlayback();
+              }}
+              aria-label={isPlaying ? "Pause video" : "Play video"}
+              title={`${isPlaying ? "Pause video" : "Play video"} (Space)`}
+            >
+              {isPlaying ? <PauseIcon /> : <PlayIcon />}
+            </button>
+            <button
+              className="local-player-center-action local-player-center-action--seek"
+              type="button"
+              onClick={() => {
+                revealControls();
+                seekBy(10);
+              }}
+              aria-label="Forward 10 seconds"
+              title="Forward 10 seconds (Right Arrow)"
+            >
+              <span className="local-player-seek-content">
+                <Seek10Icon mirrored />
+                <span className="local-player-seek-label">10</span>
+              </span>
+            </button>
+          </div>
         ) : null}
         <div className={`local-player-overlay ${isPointerActive ? "local-player-overlay--visible" : "local-player-overlay--hidden"}`}>
           <div className="local-player-topbar">
@@ -1489,13 +1648,13 @@ export function LocalFileRoomPlayer({
                 <button className="local-player-icon-button" type="button" onClick={() => {
                   revealControls();
                   togglePlayback();
-                }} disabled={!mediaUrl} aria-label={isPlaying ? "Pause video" : "Play video"}>
+                }} disabled={!mediaUrl} aria-label={isPlaying ? "Pause video" : "Play video"} title={`${isPlaying ? "Pause video" : "Play video"} (Space)`}>
                   {isPlaying ? <PauseIcon /> : <PlayIcon />}
                 </button>
                 <button className="local-player-icon-button" type="button" onClick={() => {
                   revealControls();
                   toggleMute();
-                }} disabled={!mediaUrl} aria-label={isMuted || volume === 0 ? "Unmute video" : "Mute video"}>
+                }} disabled={!mediaUrl} aria-label={isMuted || volume === 0 ? "Unmute video" : "Mute video"} title={`${isMuted || volume === 0 ? "Unmute video" : "Mute video"} (M)`}>
                   {isMuted || volume === 0 ? <VolumeMutedIcon /> : <VolumeHighIcon />}
                 </button>
                 <input
@@ -1533,7 +1692,7 @@ export function LocalFileRoomPlayer({
                       onTheaterModeChange(!isTheaterMode);
                     }}
                     aria-label={isTheaterMode ? "Exit theater mode" : "Enter theater mode"}
-                    title={isTheaterMode ? "Exit theater mode" : "Enter theater mode"}
+                    title={`${isTheaterMode ? "Exit theater mode" : "Enter theater mode"} (T)`}
                   >
                     <TheaterIcon />
                   </button>
@@ -1545,7 +1704,7 @@ export function LocalFileRoomPlayer({
                       void toggleFullscreen();
                     }}
                     aria-label={isFullscreenMode ? "Exit fullscreen" : "Enter fullscreen"}
-                    title={isFullscreenMode ? "Exit fullscreen" : "Enter fullscreen"}
+                    title={`${isFullscreenMode ? "Exit fullscreen" : "Enter fullscreen"} (F)`}
                   >
                     <ExpandIcon />
                   </button>
@@ -1555,20 +1714,22 @@ export function LocalFileRoomPlayer({
           </div>
         </div>
       </div>
-      <div className="local-player-meta">
-        <strong>{room.mediaSource.fileName}</strong>
-        <span>{localMessage}</span>
-        {room.transferState ? (
-          <>
-            <span>
-              {room.transferState.phase} {Math.round(room.transferState.progress * 100)}%
-            </span>
-            {room.transferState.bufferedUntilTime !== undefined ? (
-              <span>Buffered to {formatTime(room.transferState.bufferedUntilTime)}</span>
-            ) : null}
-          </>
-        ) : null}
-      </div>
+      {showDebugInfo ? (
+        <div className="local-player-meta">
+          <strong>{room.mediaSource.fileName}</strong>
+          <span>{localMessage}</span>
+          {room.transferState ? (
+            <>
+              <span>
+                {room.transferState.phase} {Math.round(room.transferState.progress * 100)}%
+              </span>
+              {room.transferState.bufferedUntilTime !== undefined ? (
+                <span>Buffered to {formatTime(room.transferState.bufferedUntilTime)}</span>
+              ) : null}
+            </>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 

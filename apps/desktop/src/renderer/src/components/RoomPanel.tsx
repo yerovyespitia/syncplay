@@ -64,6 +64,22 @@ interface RoomPanelProps {
   onTransferState: (transferState: TransferState) => void;
 }
 
+function getPlaybackReadyLabel(transferState: TransferState) {
+  if (transferState.phase === "failed") {
+    return "Playback unavailable";
+  }
+
+  if (transferState.isPlaybackReady || transferState.phase === "ready" || transferState.phase === "streaming") {
+    return "Ready to play";
+  }
+
+  if (transferState.phase === "connecting_peer" || transferState.phase === "waiting_host") {
+    return "Connecting playback";
+  }
+
+  return "Preparing playback";
+}
+
 export function RoomPanel({
   room,
   localFile,
@@ -88,6 +104,14 @@ export function RoomPanel({
   const [showDebugLogs, setShowDebugLogs] = useState(import.meta.env.DEV);
   const [isTheaterMode, setIsTheaterMode] = useState(false);
   const canToggleDebugLogs = import.meta.env.DEV;
+  const shouldShowPlaybackReadiness =
+    !showDebugLogs && room.mediaSource.type === "local_file" && Boolean(room.transferState);
+  const playbackReadyPercent = room.transferState
+    ? room.transferState.isPlaybackReady
+      ? 100
+      : Math.round(room.transferState.progress * 100)
+    : 0;
+  const playbackReadyLabel = room.transferState ? getPlaybackReadyLabel(room.transferState) : "";
 
   function handleCopyCode() {
     navigator.clipboard.writeText(room.roomId).then(() => {
@@ -152,7 +176,7 @@ export function RoomPanel({
               onClick={() => setShowDebugLogs((current) => !current)}
               type="button"
             >
-              Logs {showDebugLogs ? "on" : "off"}
+              Dev mode
             </button>
           ) : null}
           <button className="action-button action-button--sync" onClick={onRequestSync} type="button">
@@ -181,6 +205,7 @@ export function RoomPanel({
               selfId={selfId}
               localFile={localFile}
               isTheaterMode={isTheaterMode}
+              showDebugInfo={showDebugLogs}
               remoteCommand={remoteCommand}
               peerSignal={peerSignal}
               onDebug={onDebug}
@@ -196,10 +221,6 @@ export function RoomPanel({
             />
           )}
 
-          <div className="player-status">
-            <span>{room.playbackState === "playing" ? "Playing" : "Paused"}</span>
-            <span>{lastActionLabel}</span>
-          </div>
         </div>
 
         <aside className={`sidebar-card ${isTheaterMode ? "sidebar-card--hidden" : ""}`}>
@@ -215,24 +236,46 @@ export function RoomPanel({
             </ul>
           </div>
 
-          <div className="sync-stats">
-            <div>
-              <span className="stat-label">Current time</span>
-              <strong>{room.currentTime.toFixed(1)}s</strong>
-            </div>
-            <div>
-              <span className="stat-label">Events</span>
-              <strong>{room.lastEventId}</strong>
-            </div>
-            {room.transferState ? (
-              <div>
-                <span className="stat-label">Transfer</span>
-                <strong>
-                  {room.transferState.phase} {Math.round(room.transferState.progress * 100)}%
-                </strong>
+          {shouldShowPlaybackReadiness && room.transferState ? (
+            <div className="playback-readiness-card">
+              <div className="playback-readiness-header">
+                <span className="stat-label">Playback ready</span>
+                <strong>{playbackReadyPercent}%</strong>
               </div>
-            ) : null}
-          </div>
+              <div
+                className="playback-readiness-bar"
+                aria-label={`Playback ready ${playbackReadyPercent}%`}
+                role="progressbar"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={playbackReadyPercent}
+              >
+                <span style={{ width: `${playbackReadyPercent}%` }} />
+              </div>
+              <p className="playback-readiness-copy">{playbackReadyLabel}</p>
+            </div>
+          ) : null}
+
+          {showDebugLogs ? (
+            <div className="sync-stats">
+              <div>
+                <span className="stat-label">Current time</span>
+                <strong>{room.currentTime.toFixed(1)}s</strong>
+              </div>
+              <div>
+                <span className="stat-label">Events</span>
+                <strong>{room.lastEventId}</strong>
+              </div>
+              {room.transferState ? (
+                <div>
+                  <span className="stat-label">Transfer</span>
+                  <strong>
+                    {room.transferState.phase} {Math.round(room.transferState.progress * 100)}%
+                  </strong>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
 
           {showDebugLogs ? (
             <div className="debug-panel">
