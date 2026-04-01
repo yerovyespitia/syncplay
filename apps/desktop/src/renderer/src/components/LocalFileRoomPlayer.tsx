@@ -352,10 +352,12 @@ export function LocalFileRoomPlayer({
   const controlsHideTimeoutRef = useRef<number | null>(null);
   const subtitleInputRef = useRef<HTMLInputElement | null>(null);
   const subtitleObjectUrlRef = useRef<string | null>(null);
+  const subtitleMenuRef = useRef<HTMLDivElement | null>(null);
   const subtitleTrackListenersRef = useRef<Array<{ track: TextTrack; listener: () => void }>>([]);
   const [mediaUrl, setMediaUrl] = useState<string | null>(null);
   const [subtitleUrl, setSubtitleUrl] = useState<string | null>(null);
   const [activeSubtitleLines, setActiveSubtitleLines] = useState<string[]>([]);
+  const [isSubtitleMenuOpen, setIsSubtitleMenuOpen] = useState(false);
   const [localMessage, setLocalMessage] = useState("Waiting for peer connection");
   const [isFullscreenMode, setIsFullscreenMode] = useState(false);
   const [isPlaying, setIsPlaying] = useState(room.playbackState === "playing");
@@ -370,7 +372,7 @@ export function LocalFileRoomPlayer({
   const mediaTitle = useMemo(() => formatMediaTitle(room.mediaSource.fileName), [room.mediaSource.fileName]);
   const subtitleLabel = `${isHost ? "Host" : "Guest"} • Local file${room.subtitleTrack ? " • Shared subtitles" : ""}`;
   const hasSubtitleTrack = Boolean(room.subtitleTrack && subtitleUrl);
-  const subtitleButtonTitle = hasSubtitleTrack ? "Replace subtitles (.srt, .vtt)" : "Upload subtitles (.srt, .vtt)";
+  const subtitleButtonTitle = hasSubtitleTrack ? "Subtitle options" : "Upload subtitles (.srt, .vtt)";
   const safeDuration = Math.max(duration, 0);
   const progressPercent = safeDuration > 0 ? Math.min(100, (currentTime / safeDuration) * 100) : 0;
   const volumePercent = Math.min(100, Math.max(0, (isMuted ? 0 : volume) * 100));
@@ -453,6 +455,34 @@ export function LocalFileRoomPlayer({
   useEffect(() => {
     syncSubtitleTrackMode();
   }, [isCaptionsEnabled, subtitleUrl, mediaUrl]);
+
+  useEffect(() => {
+    if (!isSubtitleMenuOpen) {
+      return;
+    }
+
+    function handlePointerDown(event: MouseEvent) {
+      if (subtitleMenuRef.current?.contains(event.target as Node)) {
+        return;
+      }
+
+      setIsSubtitleMenuOpen(false);
+    }
+
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setIsSubtitleMenuOpen(false);
+      }
+    }
+
+    window.addEventListener("mousedown", handlePointerDown);
+    window.addEventListener("keydown", handleEscape);
+
+    return () => {
+      window.removeEventListener("mousedown", handlePointerDown);
+      window.removeEventListener("keydown", handleEscape);
+    };
+  }, [isSubtitleMenuOpen]);
 
   useEffect(() => {
     const wrapper = videoRef.current?.closest(".local-player-wrapper");
@@ -1702,6 +1732,21 @@ export function LocalFileRoomPlayer({
   }
 
   function handleClosedCaptionsAction() {
+    if (!hasSubtitleTrack) {
+      subtitleInputRef.current?.click();
+      return;
+    }
+
+    setIsSubtitleMenuOpen((current) => !current);
+  }
+
+  function handleToggleCaptions() {
+    setIsCaptionsEnabled((current) => !current);
+    setIsSubtitleMenuOpen(false);
+  }
+
+  function handleReplaceSubtitles() {
+    setIsSubtitleMenuOpen(false);
     subtitleInputRef.current?.click();
   }
 
@@ -1740,6 +1785,7 @@ export function LocalFileRoomPlayer({
       });
       updateLocalMessage(`Subtitles synced: ${file.name}`);
       setIsCaptionsEnabled(true);
+      setIsSubtitleMenuOpen(false);
     } catch {
       updateLocalMessage("Could not read subtitle file");
     }
@@ -2007,20 +2053,44 @@ export function LocalFileRoomPlayer({
                   >
                     <TheaterIcon />
                   </button>
-                  <button
-                    className={`local-player-toolbar-button local-player-toolbar-button--icon ${
-                      hasSubtitleTrack && isCaptionsEnabled ? "local-player-toolbar-button--active" : ""
-                    }`}
-                    type="button"
-                    onClick={() => {
-                      revealControls();
-                      handleClosedCaptionsAction();
-                    }}
-                    aria-label={hasSubtitleTrack ? "Replace subtitles" : "Upload subtitles"}
-                    title={subtitleButtonTitle}
-                  >
-                    <ClosedCaptionsIcon />
-                  </button>
+                  <div ref={subtitleMenuRef} className="local-player-subtitle-menu-anchor">
+                    <button
+                      className={`local-player-toolbar-button local-player-toolbar-button--icon ${
+                        hasSubtitleTrack && isCaptionsEnabled ? "local-player-toolbar-button--active" : ""
+                      }`}
+                      type="button"
+                      onClick={() => {
+                        revealControls();
+                        handleClosedCaptionsAction();
+                      }}
+                      aria-label={hasSubtitleTrack ? "Subtitle options" : "Upload subtitles"}
+                      aria-expanded={hasSubtitleTrack ? isSubtitleMenuOpen : undefined}
+                      aria-haspopup={hasSubtitleTrack ? "menu" : undefined}
+                      title={subtitleButtonTitle}
+                    >
+                      <ClosedCaptionsIcon />
+                    </button>
+                    {hasSubtitleTrack && isSubtitleMenuOpen ? (
+                      <div className="local-player-subtitle-menu" role="menu" aria-label="Subtitle options">
+                        <button
+                          className="local-player-subtitle-menu-item"
+                          type="button"
+                          role="menuitem"
+                          onClick={handleToggleCaptions}
+                        >
+                          {isCaptionsEnabled ? "Hide subtitles" : "Show subtitles"}
+                        </button>
+                        <button
+                          className="local-player-subtitle-menu-item"
+                          type="button"
+                          role="menuitem"
+                          onClick={handleReplaceSubtitles}
+                        >
+                          Replace subtitles
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
                   <button
                     className="local-player-toolbar-button local-player-toolbar-button--icon"
                     type="button"
