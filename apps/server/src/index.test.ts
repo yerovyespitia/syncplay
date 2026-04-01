@@ -49,6 +49,7 @@ describe("syncplay server chat", () => {
     const host = await openSocket(server.port, sockets);
     const guest = await openSocket(server.port, sockets);
     const created = await createRoom(host, "Alice");
+    await host.nextEvent("chat_message_received");
 
     guest.send({
       type: "join_room",
@@ -70,6 +71,7 @@ describe("syncplay server chat", () => {
     const host = await openSocket(server.port, sockets);
     const guest = await openSocket(server.port, sockets);
     const created = await createRoom(host, "Alice");
+    await host.nextEvent("chat_message_received");
     await joinRoom(guest, created.payload.room.roomId, "Bob");
 
     await host.nextEvent("chat_message_received");
@@ -92,6 +94,8 @@ describe("syncplay server chat", () => {
     const hostB = await openSocket(server.port, sockets);
     const roomA = await createRoom(hostA, "Alice");
     const roomB = await createRoom(hostB, "Carol");
+    await hostA.nextEvent("chat_message_received");
+    await hostB.nextEvent("chat_message_received");
 
     await joinRoom(guestA, roomA.payload.room.roomId, "Bob");
     await hostA.nextEvent("chat_message_received");

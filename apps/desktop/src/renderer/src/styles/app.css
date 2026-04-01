@@ -355,7 +355,7 @@ button:disabled {
   align-self: start;
   min-height: 0;
   min-width: 0;
-  padding: 0 0 0 24px;
+  padding: 0 0 0 14px;
   border-left: 1px solid rgba(255, 255, 255, 0.06);
   overflow: hidden;
 }
@@ -1117,51 +1117,61 @@ button:disabled {
   flex: 0 0 auto;
 }
 
-.playback-readiness-card {
-  padding: 10px 12px;
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid rgba(255, 255, 255, 0.05);
-}
-
-.playback-readiness-card--below-player {
-  margin-top: 16px;
-}
-
-.playback-readiness-header {
+.local-player-loading-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  background: #000;
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
+  align-items: center;
+  justify-content: center;
+}
+
+.local-player-loading-content {
+  width: min(320px, 80%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   gap: 10px;
 }
 
-.playback-readiness-header strong {
-  color: #fafafa;
-  font-size: 0.96rem;
-  font-weight: 700;
-  letter-spacing: -0.02em;
+.local-player-loading-label {
+  color: #a1a1aa;
+  font-size: 0.75rem;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 
-.playback-readiness-bar {
+.local-player-loading-percent {
+  color: #fafafa;
+  font-size: 2rem;
+  font-weight: 700;
+  letter-spacing: -0.04em;
+  line-height: 1;
+}
+
+.local-player-loading-bar {
   width: 100%;
-  height: 6px;
-  margin-top: 8px;
+  height: 4px;
   border-radius: 999px;
   overflow: hidden;
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.12);
 }
 
-.playback-readiness-bar span {
+.local-player-loading-bar span {
   display: block;
   height: 100%;
   border-radius: inherit;
   background: linear-gradient(90deg, #8b5cf6, #c4b5fd);
+  transition: width 300ms ease;
 }
 
-.playback-readiness-copy {
-  margin: 8px 0 0;
-  color: #a1a1aa;
-  font-size: 0.76rem;
+.local-player-loading-hint {
+  color: #52525b;
+  font-size: 0.72rem;
+  text-align: center;
+  line-height: 1.5;
 }
 
 .chat-panel {
@@ -1235,8 +1245,8 @@ button:disabled {
 }
 
 .chat-message--system {
-  background: rgba(139, 92, 246, 0.07);
-  border-color: rgba(139, 92, 246, 0.16);
+  background: rgba(59, 130, 246, 0.07);
+  border-color: rgba(59, 130, 246, 0.18);
 }
 
 .chat-message-meta {
@@ -1257,7 +1267,7 @@ button:disabled {
 }
 
 .chat-message--system .chat-message-meta strong {
-  color: #c4b5fd;
+  color: #93c5fd;
 }
 
 .chat-message-author {

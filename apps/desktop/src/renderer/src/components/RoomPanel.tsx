@@ -105,21 +105,6 @@ function LeaveIcon() {
   );
 }
 
-function getPlaybackReadyLabel(transferState: TransferState) {
-  if (transferState.phase === "failed") {
-    return "Playback unavailable";
-  }
-
-  if (transferState.isPlaybackReady || transferState.phase === "ready" || transferState.phase === "streaming") {
-    return "Ready to play";
-  }
-
-  if (transferState.phase === "connecting_peer" || transferState.phase === "waiting_host") {
-    return "Connecting playback";
-  }
-
-  return "Preparing playback";
-}
 
 function formatChatTimestamp(value: number) {
   return new Date(value).toLocaleTimeString([], {
@@ -177,7 +162,7 @@ export function RoomPanel({
   const chatMessagesEndRef = useRef<HTMLDivElement | null>(null);
   const canToggleDebugLogs = import.meta.env.DEV;
   const shouldShowPlaybackReadiness =
-    !showDebugLogs &&
+    room.participants.length > 1 &&
     (room.mediaSource.type === "local_file" || room.mediaSource.type === "torrent_magnet") &&
     Boolean(room.transferState);
   const playbackReadyPercent = room.transferState
@@ -185,7 +170,7 @@ export function RoomPanel({
       ? 100
       : Math.round(room.transferState.progress * 100)
     : 0;
-  const playbackReadyLabel = room.transferState ? getPlaybackReadyLabel(room.transferState) : "";
+  const showLoadingOverlay = shouldShowPlaybackReadiness && !room.transferState?.isPlaybackReady;
   const visibleChatMessages = useMemo(() => room.chatMessages, [room.chatMessages]);
 
   useEffect(() => {
@@ -337,6 +322,8 @@ export function RoomPanel({
               showDebugInfo={showDebugLogs}
               remoteCommand={remoteCommand}
               peerSignal={peerSignal}
+              showLoadingOverlay={showLoadingOverlay}
+              loadingPercent={playbackReadyPercent}
               onDebug={onDebug}
               onPlay={onPlay}
               onPause={onPause}
@@ -349,26 +336,6 @@ export function RoomPanel({
               onTransferState={onTransferState}
             />
           )}
-
-          {shouldShowPlaybackReadiness && room.transferState ? (
-            <div className="playback-readiness-card playback-readiness-card--below-player">
-              <div className="playback-readiness-header">
-                <span className="stat-label">Playback ready</span>
-                <strong>{playbackReadyPercent}%</strong>
-              </div>
-              <div
-                className="playback-readiness-bar"
-                aria-label={`Playback ready ${playbackReadyPercent}%`}
-                role="progressbar"
-                aria-valuemin={0}
-                aria-valuemax={100}
-                aria-valuenow={playbackReadyPercent}
-              >
-                <span style={{ width: `${playbackReadyPercent}%` }} />
-              </div>
-              <p className="playback-readiness-copy">{playbackReadyLabel}</p>
-            </div>
-          ) : null}
         </div>
 
         <aside

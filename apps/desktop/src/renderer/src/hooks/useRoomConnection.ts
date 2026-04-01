@@ -291,6 +291,7 @@ export function useRoomConnection() {
 
   const joinRoom = useCallback(
     (roomId: string) => {
+      setError(null);
       send({
         type: "join_room",
         payload: {

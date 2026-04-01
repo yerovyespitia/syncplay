@@ -46,6 +46,8 @@ interface LocalFileRoomPlayerProps {
   localFile: PickedLocalFile | File | null;
   isTheaterMode: boolean;
   showDebugInfo?: boolean;
+  showLoadingOverlay?: boolean;
+  loadingPercent?: number;
   remoteCommand: RemotePlaybackCommand | null;
   peerSignal: PeerSignal | null;
   onDebug?: (entry: { scope: "local"; message: string; details?: string }) => void;
@@ -251,6 +253,8 @@ export function LocalFileRoomPlayer({
   localFile,
   isTheaterMode,
   showDebugInfo = false,
+  showLoadingOverlay = false,
+  loadingPercent = 0,
   remoteCommand,
   peerSignal,
   onDebug,
@@ -328,6 +332,20 @@ export function LocalFileRoomPlayer({
       roomId: room.roomId
     });
   }, [debugRole, room.roomId]);
+
+  useEffect(() => {
+    if (showLoadingOverlay) {
+      const video = videoRef.current;
+      if (video) {
+        video.pause();
+        if (video.currentTime > 0) {
+          video.currentTime = 0;
+        }
+      }
+      setIsPlaying(false);
+      setCurrentTime(0);
+    }
+  }, [showLoadingOverlay]);
 
   useEffect(() => {
     return () => {
@@ -1414,7 +1432,7 @@ export function LocalFileRoomPlayer({
   function togglePlayback() {
     const video = videoRef.current;
 
-    if (!video || !mediaUrl) {
+    if (!video || !mediaUrl || showLoadingOverlay) {
       return;
     }
 
@@ -1563,6 +1581,25 @@ export function LocalFileRoomPlayer({
             void toggleFullscreen();
           }}
         />
+        {showLoadingOverlay ? (
+          <div className="local-player-loading-overlay" aria-live="polite">
+            <div className="local-player-loading-content">
+              <p className="local-player-loading-label">{isHost ? "Buffering for guest" : "Buffering video"}</p>
+              <strong className="local-player-loading-percent">{loadingPercent}%</strong>
+              <div
+                className="local-player-loading-bar"
+                role="progressbar"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={loadingPercent}
+                aria-label={`Loading playback ${loadingPercent}%`}
+              >
+                <span style={{ width: `${loadingPercent}%` }} />
+              </div>
+              <p className="local-player-loading-hint">{isHost ? "Playback will unlock once your guest has enough buffer to start" : "Downloading enough video to start playback in sync"}</p>
+            </div>
+          </div>
+        ) : null}
         {mediaUrl ? (
           <div
             className={`local-player-center-controls ${
@@ -1640,7 +1677,7 @@ export function LocalFileRoomPlayer({
                   revealControls();
                   handleTimelineInput(event);
                 }}
-                disabled={!mediaUrl || duration <= 0}
+                disabled={!mediaUrl || duration <= 0 || showLoadingOverlay}
                 aria-label="Playback timeline"
                 style={
                   {
@@ -1655,7 +1692,7 @@ export function LocalFileRoomPlayer({
                 <button className="local-player-icon-button" type="button" onClick={() => {
                   revealControls();
                   togglePlayback();
-                }} disabled={!mediaUrl} aria-label={isPlaying ? "Pause video" : "Play video"} title={`${isPlaying ? "Pause video" : "Play video"} (Space)`}>
+                }} disabled={!mediaUrl || showLoadingOverlay} aria-label={isPlaying ? "Pause video" : "Play video"} title={`${isPlaying ? "Pause video" : "Play video"} (Space)`}>
                   {isPlaying ? <PauseIcon /> : <PlayIcon />}
                 </button>
                 <button className="local-player-icon-button" type="button" onClick={() => {

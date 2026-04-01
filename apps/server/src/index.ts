@@ -1,7 +1,7 @@
 import type { ChatMessage, ClientEvent, Participant, ServerEnvelope, TransferState } from "@syncplay/shared";
 import { normalizeRoomId } from "@syncplay/shared";
 
-import { buildJoinMessage, buildLeaveMessage, normalizeChatMessageText, resolveParticipantName } from "./chat";
+import { buildHostJoinMessage, buildJoinMessage, buildLeaveMessage, buildPlaybackActionMessage, normalizeChatMessageText, resolveParticipantName } from "./chat";
 import { RoomManager } from "./room-manager";
 
 type SocketData = {
@@ -156,6 +156,7 @@ export function createSyncPlayServer(port = Number(process.env.PORT ?? 8787)) {
             room: created.room
           }
         });
+        broadcastChatMessage(created.room.roomId, createSystemChatMessage(created.room.roomId, participant, buildHostJoinMessage(participant)));
         return;
       }
 
@@ -307,6 +308,14 @@ export function createSyncPlayServer(port = Number(process.env.PORT ?? 8787)) {
           type: "player_state_changed",
           payload: applied
         });
+
+        const actor = applied.room.participants.find((p) => p.id === ws.data.participantId);
+        if (actor && applied.room.participants.length > 1) {
+          broadcastChatMessage(
+            applied.room.roomId,
+            createSystemChatMessage(applied.room.roomId, actor, buildPlaybackActionMessage(actor, event.type, applied.room.currentTime))
+          );
+        }
         return;
       }
 
