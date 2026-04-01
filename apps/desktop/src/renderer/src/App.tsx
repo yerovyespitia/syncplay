@@ -46,7 +46,7 @@ function formatPlatformLabel(value: string) {
     return "Linux";
   }
 
-  return "web";
+  return "Web";
 }
 
 function detectPlatformLabel() {
@@ -65,7 +65,7 @@ function detectPlatformLabel() {
 
 function detectElectronVersion() {
   const match = navigator.userAgent.match(/Electron\/([\d.]+)/);
-  return match?.[1] ?? "web";
+  return match?.[1] ?? "Web";
 }
 
 function formatConnectionLabel(status: string) {
@@ -539,7 +539,7 @@ export default function App() {
               <SyncPlayLogo className="top-bar-brand__logo" />
               <div className="top-bar-brand__copy">
                 <span className="eyebrow">SyncPlay</span>
-                <strong>Desktop</strong>
+                <strong>{hasDesktopBridge ? "Desktop" : "Web"}</strong>
               </div>
             </div>
             <div className="hero-meta">
@@ -578,10 +578,9 @@ export default function App() {
 
           <section className="hero-section">
             <div className="hero-copy">
-              <h1>Watch together from YouTube or a local file.</h1>
+              <h1>Watch anything together, in sync.</h1>
               <p className="hero-text">
-                Keep playback in sync with room codes, and choose whether the session starts from a YouTube link or a
-                host-shared local video file.
+                Share a room code and play from YouTube, a local file, or a magnet link — everyone stays in perfect sync.
               </p>
             </div>
             <div className="hero-alias">
