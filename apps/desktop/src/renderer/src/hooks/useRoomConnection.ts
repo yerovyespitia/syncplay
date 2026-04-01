@@ -120,6 +120,7 @@ export function useRoomConnection() {
         return;
       case "presence_updated":
         setRoom(event.payload.room);
+        setError(null);
         setLastActionLabel(`${event.payload.room.participants.length} participant(s) connected`);
         return;
       case "chat_message_received":

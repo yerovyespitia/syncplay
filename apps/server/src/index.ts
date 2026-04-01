@@ -6,6 +6,7 @@ import {
   buildJoinMessage,
   buildLeaveMessage,
   buildPlaybackActionMessage,
+  buildResyncMessage,
   buildSubtitleAddedMessage,
   normalizeChatMessageText,
   resolveParticipantName
@@ -219,6 +220,15 @@ export function createSyncPlayServer(port = Number(process.env.PORT ?? 8787)) {
             room
           }
         });
+
+        const actor = room.participants.find((participant) => participant.id === ws.data.participantId);
+
+        if (actor) {
+          broadcastChatMessage(
+            room.roomId,
+            createSystemChatMessage(room.roomId, actor, buildResyncMessage(actor, room.currentTime))
+          );
+        }
         return;
       }
 
@@ -368,6 +378,10 @@ export function createSyncPlayServer(port = Number(process.env.PORT ?? 8787)) {
         if (transferState.phase === "ready") {
           broadcast(room.roomId, {
             type: "local_file_ready",
+            payload: { room }
+          });
+          broadcast(room.roomId, {
+            type: "sync_snapshot",
             payload: { room }
           });
         }

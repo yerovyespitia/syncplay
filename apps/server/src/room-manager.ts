@@ -84,21 +84,27 @@ export class RoomManager {
       };
     }
 
+    const nextState = advanceRoomPlayback(record.state);
     record.participants.set(participant.id, participant);
-    record.state.participants = Array.from(record.participants.values());
-    record.state.updatedAt = Date.now();
+    nextState.participants = Array.from(record.participants.values());
+    nextState.updatedAt = Date.now();
 
-    if (record.state.mediaSource.type === "local_file" || record.state.mediaSource.type === "torrent_magnet") {
-      record.state.transferState = {
+    if (nextState.mediaSource.type === "local_file" || nextState.mediaSource.type === "torrent_magnet") {
+      nextState.playbackState = "paused";
+      nextState.currentTime = 0;
+      nextState.lastEventId += 1;
+      nextState.transferState = {
         phase: "connecting_peer",
         bytesReceived: 0,
-        bytesTotal: record.state.mediaSource.fileSize,
+        bytesTotal: nextState.mediaSource.fileSize,
         bytesPersisted: 0,
         progress: 0,
         isPlaybackReady: false,
         availableRanges: []
       };
     }
+
+    record.state = nextState;
 
     return {
       ok: true as const,
@@ -127,8 +133,10 @@ export class RoomManager {
       };
     }
 
-    record.state.participants = Array.from(record.participants.values());
-    record.state.updatedAt = Date.now();
+    const nextState = advanceRoomPlayback(record.state);
+    nextState.participants = Array.from(record.participants.values());
+    nextState.updatedAt = Date.now();
+    record.state = nextState;
 
     return {
       room: record.state,
@@ -151,16 +159,17 @@ export class RoomManager {
       return null;
     }
 
+    const nextState = advanceRoomPlayback(record.state);
     const nextMessage: ChatMessage = {
       id: crypto.randomUUID(),
-      roomId: record.state.roomId,
+      roomId: nextState.roomId,
       createdAt: Date.now(),
       ...message
     };
 
     record.state = {
-      ...record.state,
-      chatMessages: appendChatMessage(record.state.chatMessages, nextMessage),
+      ...nextState,
+      chatMessages: appendChatMessage(nextState.chatMessages, nextMessage),
       updatedAt: Date.now(),
       participants: Array.from(record.participants.values())
     };
@@ -215,8 +224,19 @@ export class RoomManager {
       return null;
     }
 
+    const nextState = advanceRoomPlayback(record.state);
+
+    const shouldStartFromBeginning =
+      (nextState.mediaSource.type === "local_file" || nextState.mediaSource.type === "torrent_magnet") &&
+      nextState.participants.length > 1 &&
+      transferState.phase === "ready" &&
+      nextState.transferState?.phase !== "ready";
+
     record.state = {
-      ...record.state,
+      ...nextState,
+      playbackState: shouldStartFromBeginning ? "playing" : nextState.playbackState,
+      currentTime: shouldStartFromBeginning ? 0 : nextState.currentTime,
+      lastEventId: shouldStartFromBeginning ? nextState.lastEventId + 1 : nextState.lastEventId,
       transferState,
       updatedAt: Date.now(),
       participants: Array.from(record.participants.values())
@@ -232,8 +252,10 @@ export class RoomManager {
       return null;
     }
 
+    const nextState = advanceRoomPlayback(record.state);
+
     record.state = {
-      ...record.state,
+      ...nextState,
       subtitleTrack,
       updatedAt: Date.now(),
       participants: Array.from(record.participants.values())
@@ -261,6 +283,24 @@ function clampPlaybackTime(value: number) {
   }
 
   return Math.max(0, value);
+}
+
+function advanceRoomPlayback(room: RoomState, now = Date.now()): RoomState {
+  if (room.playbackState !== "playing") {
+    return room;
+  }
+
+  const elapsedSeconds = Math.max(0, (now - room.updatedAt) / 1000);
+
+  if (elapsedSeconds <= 0) {
+    return room;
+  }
+
+  return {
+    ...room,
+    currentTime: clampPlaybackTime(room.currentTime + elapsedSeconds),
+    updatedAt: now
+  };
 }
 
 function appendChatMessage(messages: ChatMessage[], nextMessage: ChatMessage) {

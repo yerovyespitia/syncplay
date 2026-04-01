@@ -98,6 +98,23 @@ describe("RoomManager", () => {
     expect(thirdJoin.ok).toBeFalse();
   });
 
+  test("resets local-file playback when the guest joins", () => {
+    const manager = new RoomManager();
+    const created = manager.createRoom(localFileSource, participantA);
+
+    manager.applyPlaybackAction(created.room.roomId, participantA.id, "player_play", 42);
+    const joined = manager.joinRoom(created.room.roomId, participantB);
+
+    expect(joined.ok).toBeTrue();
+    if (joined.ok) {
+      expect(joined.room.playbackState).toBe("paused");
+      expect(joined.room.currentTime).toBe(0);
+      expect(joined.room.lastEventId).toBe(2);
+      expect(joined.room.transferState?.phase).toBe("connecting_peer");
+      expect(joined.room.transferState?.isPlaybackReady).toBeFalse();
+    }
+  });
+
   test("initializes transfer state for torrent magnet rooms", () => {
     const manager = new RoomManager();
     const created = manager.createRoom(torrentSource, participantA);
@@ -168,5 +185,93 @@ describe("RoomManager", () => {
     expect(room?.chatMessages).toHaveLength(100);
     expect(room?.chatMessages[0]?.text).toBe("Message 5");
     expect(room?.chatMessages.at(-1)?.text).toBe("Message 104");
+  });
+
+  test("preserves elapsed playback time when subtitles are updated mid-playback", () => {
+    const manager = new RoomManager();
+    const created = manager.createRoom(localFileSource, participantA);
+    const originalNow = Date.now;
+
+    try {
+      let now = 1_000;
+      Date.now = () => now;
+
+      manager.applyPlaybackAction(created.room.roomId, participantA.id, "player_play", 4);
+      now = 6_000;
+
+      const room = manager.updateSubtitleTrack(created.room.roomId, {
+        fileName: "The.Net.Spanish-WWW.MY-SUBS.CO.srt",
+        label: "The Net Spanish",
+        language: "es",
+        format: "srt",
+        content: "1\n00:00:01,000 --> 00:00:03,000\nHola",
+        uploadedAt: now,
+        uploadedByParticipantId: participantA.id
+      });
+
+      expect(room?.currentTime).toBe(9);
+      expect(room?.updatedAt).toBe(now);
+      expect(room?.playbackState).toBe("playing");
+    } finally {
+      Date.now = originalNow;
+    }
+  });
+
+  test("preserves elapsed playback time when transfer state updates mid-playback", () => {
+    const manager = new RoomManager();
+    const created = manager.createRoom(localFileSource, participantA);
+    const originalNow = Date.now;
+
+    try {
+      let now = 10_000;
+      Date.now = () => now;
+
+      manager.applyPlaybackAction(created.room.roomId, participantA.id, "player_play", 12);
+      now = 13_500;
+
+      const room = manager.updateTransferState(created.room.roomId, {
+        phase: "streaming",
+        bytesReceived: 512,
+        bytesTotal: localFileSource.fileSize,
+        bytesPersisted: 512,
+        progress: 0.5,
+        isPlaybackReady: true,
+        availableRanges: [{ startByte: 0, endByte: 512 }]
+      });
+
+      expect(room?.currentTime).toBe(15.5);
+      expect(room?.updatedAt).toBe(now);
+      expect(room?.playbackState).toBe("playing");
+    } finally {
+      Date.now = originalNow;
+    }
+  });
+
+  test("starts local-file playback from the beginning when the guest becomes ready", () => {
+    const manager = new RoomManager();
+    const created = manager.createRoom(localFileSource, participantA);
+    const joined = manager.joinRoom(created.room.roomId, participantB);
+
+    expect(joined.ok).toBeTrue();
+    if (!joined.ok) {
+      return;
+    }
+
+    const room = manager.updateTransferState(created.room.roomId, {
+      phase: "ready",
+      bytesReceived: localFileSource.fileSize,
+      bytesTotal: localFileSource.fileSize,
+      bytesPersisted: localFileSource.fileSize,
+      progress: 1,
+      isPlaybackReady: true,
+      availableRanges: [{ startByte: 0, endByte: localFileSource.fileSize }],
+      message: "Ready to play"
+    });
+
+    expect(room?.playbackState).toBe("playing");
+    expect(room?.currentTime).toBe(0);
+    expect(room?.lastEventId).toBe(2);
+    expect(room?.transferState?.phase).toBe("ready");
+    expect(room?.transferState?.isPlaybackReady).toBeTrue();
   });
 });

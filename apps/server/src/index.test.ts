@@ -118,6 +118,40 @@ describe("syncplay server chat", () => {
     expect(roomB.payload.room.roomId).not.toBe(roomA.payload.room.roomId);
   });
 
+  test("emits a system chat message when a participant requests resync", async () => {
+    const host = await openSocket(server.port, sockets);
+    const guest = await openSocket(server.port, sockets);
+    const created = await createRoom(host, "Alice");
+    await host.nextEvent("chat_message_received");
+
+    host.send({
+      type: "player_seek",
+      payload: {
+        roomId: created.payload.room.roomId,
+        currentTime: 125
+      }
+    });
+
+    await host.nextEvent("player_state_changed");
+
+    await joinRoom(guest, created.payload.room.roomId, "Bob");
+    await guest.nextEvent("sync_snapshot");
+    await host.nextEvent("chat_message_received");
+    await guest.nextEvent("chat_message_received");
+
+    guest.send({
+      type: "request_sync",
+      payload: {
+        roomId: created.payload.room.roomId
+      }
+    });
+
+    await guest.nextEvent("sync_snapshot");
+    const guestMessage = await guest.nextEvent("chat_message_received");
+
+    expect(guestMessage.payload.message.text).toBe("Bob requested a resync at 2:05.");
+  });
+
   test("rejects invalid torrent magnet rooms", async () => {
     const host = await openSocket(server.port, sockets);
 

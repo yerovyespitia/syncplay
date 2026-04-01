@@ -666,6 +666,40 @@ export function LocalFileRoomPlayer({
     }
 
     window.__syncplayLocalPlayerDebug = {
+      uploadSubtitleByPath: async (filePath: string) => {
+        if (!selfId || !window.syncplayDesktop) {
+          return false;
+        }
+
+        const pickedFile = await desktopApi.pickLocalFileByPath(filePath);
+
+        if (!pickedFile) {
+          return false;
+        }
+
+        const bytes = await desktopApi.readLocalFile(pickedFile.fileId);
+        const content = new TextDecoder().decode(bytes).trim();
+        const format = detectSubtitleFormat(pickedFile.fileName);
+
+        if (!format || !content) {
+          return false;
+        }
+
+        onSubtitleTrackChange({
+          fileName: pickedFile.fileName,
+          label: normalizeSubtitleLabel(pickedFile.fileName),
+          language: "en",
+          format,
+          content,
+          uploadedAt: Date.now(),
+          uploadedByParticipantId: selfId
+        });
+
+        setIsCaptionsEnabled(true);
+        setIsSubtitleMenuOpen(false);
+        updateLocalMessage(`Subtitles synced: ${pickedFile.fileName}`);
+        return true;
+      },
       getState: () => ({
         role: debugRole,
         roomId: room.roomId,
@@ -701,7 +735,7 @@ export function LocalFileRoomPlayer({
     return () => {
       delete window.__syncplayLocalPlayerDebug;
     };
-  }, [debugRole, mediaUrl, room]);
+  }, [debugRole, desktopApi, mediaUrl, onSubtitleTrackChange, room, selfId]);
 
   useEffect(() => {
     if (isHost || mediaUrl) {

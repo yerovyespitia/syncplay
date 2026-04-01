@@ -34,6 +34,10 @@ export function buildSubtitleAddedMessage(participant: Participant, fileName: st
   return `${resolveParticipantName(participant)} added subtitles: ${fileName}.`;
 }
 
+export function buildResyncMessage(participant: Participant, currentTime: number) {
+  return `${resolveParticipantName(participant)} requested a resync at ${formatTime(currentTime)}.`;
+}
+
 function formatTime(seconds: number) {
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);
