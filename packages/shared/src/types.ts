@@ -76,6 +76,18 @@ export interface TransferState {
   message?: string;
 }
 
+export type SubtitleFileFormat = "srt" | "vtt";
+
+export interface SubtitleTrack {
+  fileName: string;
+  label: string;
+  language: string;
+  format: SubtitleFileFormat;
+  content: string;
+  uploadedAt: number;
+  uploadedByParticipantId: string;
+}
+
 export interface RoomState {
   roomId: string;
   mediaSource: MediaSource;
@@ -87,6 +99,7 @@ export interface RoomState {
   chatMessages: ChatMessage[];
   hostParticipantId?: string;
   transferState?: TransferState;
+  subtitleTrack?: SubtitleTrack;
 }
 
 type PlaybackClientEvent =
@@ -177,6 +190,13 @@ export type ClientEvent =
         roomId: string;
         transferState: TransferState;
       };
+    }
+  | {
+      type: "update_subtitle_track";
+      payload: {
+        roomId: string;
+        subtitleTrack: SubtitleTrack;
+      };
     };
 
 type PlaybackServerEvent =
@@ -262,6 +282,12 @@ export type ServerEvent =
     }
   | {
       type: "local_file_ready";
+      payload: {
+        room: RoomState;
+      };
+    }
+  | {
+      type: "subtitle_track_updated";
       payload: {
         room: RoomState;
       };

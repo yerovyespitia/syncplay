@@ -200,6 +200,7 @@ export default function App() {
     requestSync,
     sendChatMessage,
     updateTransferState,
+    updateSubtitleTrack,
     sendPeerOffer,
     sendPeerAnswer,
     sendPeerIceCandidate,
@@ -783,6 +784,7 @@ export default function App() {
           onPeerAnswer={sendPeerAnswer}
           onPeerIceCandidate={sendPeerIceCandidate}
           onTransferState={updateTransferState}
+          onSubtitleTrackChange={updateSubtitleTrack}
         />
       )}
 

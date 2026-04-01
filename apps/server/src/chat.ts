@@ -30,6 +30,10 @@ export function buildPlaybackActionMessage(
   return `${name} skipped to ${time}.`;
 }
 
+export function buildSubtitleAddedMessage(participant: Participant, fileName: string) {
+  return `${resolveParticipantName(participant)} added subtitles: ${fileName}.`;
+}
+
 function formatTime(seconds: number) {
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);

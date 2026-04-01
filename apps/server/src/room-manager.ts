@@ -4,6 +4,7 @@ import {
   type Participant,
   type PlaybackState,
   type RoomState,
+  type SubtitleTrack,
   type TransferState,
   createRoomId,
   normalizeRoomId
@@ -217,6 +218,23 @@ export class RoomManager {
     record.state = {
       ...record.state,
       transferState,
+      updatedAt: Date.now(),
+      participants: Array.from(record.participants.values())
+    };
+
+    return record.state;
+  }
+
+  updateSubtitleTrack(roomId: string, subtitleTrack: SubtitleTrack) {
+    const record = this.rooms.get(normalizeRoomId(roomId));
+
+    if (!record) {
+      return null;
+    }
+
+    record.state = {
+      ...record.state,
+      subtitleTrack,
       updatedAt: Date.now(),
       participants: Array.from(record.participants.values())
     };

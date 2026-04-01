@@ -1,7 +1,15 @@
 import type { ChatMessage, ClientEvent, Participant, ServerEnvelope, TransferState } from "@syncplay/shared";
 import { normalizeRoomId } from "@syncplay/shared";
 
-import { buildHostJoinMessage, buildJoinMessage, buildLeaveMessage, buildPlaybackActionMessage, normalizeChatMessageText, resolveParticipantName } from "./chat";
+import {
+  buildHostJoinMessage,
+  buildJoinMessage,
+  buildLeaveMessage,
+  buildPlaybackActionMessage,
+  buildSubtitleAddedMessage,
+  normalizeChatMessageText,
+  resolveParticipantName
+} from "./chat";
 import { RoomManager } from "./room-manager";
 
 type SocketData = {
@@ -23,7 +31,8 @@ const clientEventTypes = new Set<ClientEvent["type"]>([
   "peer_offer",
   "peer_answer",
   "peer_ice_candidate",
-  "peer_transfer_state"
+  "peer_transfer_state",
+  "update_subtitle_track"
 ]);
 
 function hasValidTorrentMediaSource(
@@ -370,6 +379,30 @@ export function createSyncPlayServer(port = Number(process.env.PORT ?? 8787)) {
           });
         }
 
+        return;
+      }
+
+      case "update_subtitle_track": {
+        const room = roomManager.updateSubtitleTrack(event.payload.roomId, event.payload.subtitleTrack);
+
+        if (!room) {
+          sendError(ws, "Room not found.");
+          return;
+        }
+
+        broadcast(room.roomId, {
+          type: "subtitle_track_updated",
+          payload: { room }
+        });
+
+        const actor = room.participants.find((participant) => participant.id === ws.data.participantId);
+
+        if (actor) {
+          broadcastChatMessage(
+            room.roomId,
+            createSystemChatMessage(room.roomId, actor, buildSubtitleAddedMessage(actor, event.payload.subtitleTrack.fileName))
+          );
+        }
         return;
       }
     }

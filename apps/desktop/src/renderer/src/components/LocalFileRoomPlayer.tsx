@@ -1,6 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import type { ByteRange, HostedFileMediaSource, PickedLocalFile, RangeRequestReason, RoomState, TransferState } from "@syncplay/shared";
+import type {
+  ByteRange,
+  HostedFileMediaSource,
+  PickedLocalFile,
+  RangeRequestReason,
+  RoomState,
+  SubtitleFileFormat,
+  SubtitleTrack,
+  TransferState
+} from "@syncplay/shared";
 
 type RemotePlaybackCommand =
   | {
@@ -60,6 +69,7 @@ interface LocalFileRoomPlayerProps {
   onPeerIceCandidate: (targetParticipantId: string, candidate: RTCIceCandidateInit) => void;
   onTheaterModeChange: (isTheaterMode: boolean) => void;
   onTransferState: (transferState: TransferState) => void;
+  onSubtitleTrackChange: (subtitleTrack: SubtitleTrack) => void;
 }
 
 const CHUNK_SIZE = 128 * 1024;
@@ -148,6 +158,41 @@ function formatMediaTitle(fileName: string) {
   }
 
   return `${normalizedTitle.slice(0, MEDIA_TITLE_MAX_LENGTH)}...`;
+}
+
+function detectSubtitleFormat(fileName: string): SubtitleFileFormat | null {
+  const normalized = fileName.toLowerCase();
+
+  if (normalized.endsWith(".srt")) {
+    return "srt";
+  }
+
+  if (normalized.endsWith(".vtt")) {
+    return "vtt";
+  }
+
+  return null;
+}
+
+function normalizeSubtitleLabel(fileName: string) {
+  return fileName.replace(/\.[^/.]+$/, "").replace(/[_-]+/g, " ").trim() || "Custom subtitles";
+}
+
+function normalizeVttContent(content: string) {
+  const normalized = content.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
+  return normalized.startsWith("WEBVTT") ? normalized : `WEBVTT\n\n${normalized}`;
+}
+
+function convertSrtToVtt(content: string) {
+  const normalized = content
+    .replace(/\uFEFF/g, "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .replace(/^(\d+)\n/gm, "")
+    .replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, "$1.$2")
+    .trim();
+
+  return `WEBVTT\n\n${normalized}`;
 }
 
 function isEditableTarget(target: EventTarget | null) {
@@ -275,7 +320,8 @@ export function LocalFileRoomPlayer({
   onPeerAnswer,
   onPeerIceCandidate,
   onTheaterModeChange,
-  onTransferState
+  onTransferState,
+  onSubtitleTrackChange
 }: LocalFileRoomPlayerProps) {
   const isHost = room.hostParticipantId === selfId;
   const peerRef = useRef<RTCPeerConnection | null>(null);
@@ -304,11 +350,17 @@ export function LocalFileRoomPlayer({
   const lastReportedTransferRef = useRef<TransferState | null>(null);
   const localMessageRef = useRef("Waiting for peer connection");
   const controlsHideTimeoutRef = useRef<number | null>(null);
+  const subtitleInputRef = useRef<HTMLInputElement | null>(null);
+  const subtitleObjectUrlRef = useRef<string | null>(null);
+  const subtitleTrackListenersRef = useRef<Array<{ track: TextTrack; listener: () => void }>>([]);
   const [mediaUrl, setMediaUrl] = useState<string | null>(null);
+  const [subtitleUrl, setSubtitleUrl] = useState<string | null>(null);
+  const [activeSubtitleLines, setActiveSubtitleLines] = useState<string[]>([]);
   const [localMessage, setLocalMessage] = useState("Waiting for peer connection");
   const [isFullscreenMode, setIsFullscreenMode] = useState(false);
   const [isPlaying, setIsPlaying] = useState(room.playbackState === "playing");
   const [isMuted, setIsMuted] = useState(false);
+  const [isCaptionsEnabled, setIsCaptionsEnabled] = useState(Boolean(room.subtitleTrack));
   const [volume, setVolume] = useState(1);
   const [currentTime, setCurrentTime] = useState(room.currentTime);
   const [duration, setDuration] = useState(room.mediaSource.duration ?? 0);
@@ -316,7 +368,9 @@ export function LocalFileRoomPlayer({
   const debugRole = isHost ? "host" : "guest";
   const desktopApi = window.syncplayDesktop ?? fallbackDesktopApi;
   const mediaTitle = useMemo(() => formatMediaTitle(room.mediaSource.fileName), [room.mediaSource.fileName]);
-  const subtitleLabel = `${isHost ? "Host" : "Guest"} • Local file`;
+  const subtitleLabel = `${isHost ? "Host" : "Guest"} • Local file${room.subtitleTrack ? " • Shared subtitles" : ""}`;
+  const hasSubtitleTrack = Boolean(room.subtitleTrack && subtitleUrl);
+  const subtitleButtonTitle = hasSubtitleTrack ? "Replace subtitles (.srt, .vtt)" : "Upload subtitles (.srt, .vtt)";
   const safeDuration = Math.max(duration, 0);
   const progressPercent = safeDuration > 0 ? Math.min(100, (currentTime / safeDuration) * 100) : 0;
   const volumePercent = Math.min(100, Math.max(0, (isMuted ? 0 : volume) * 100));
@@ -361,11 +415,44 @@ export function LocalFileRoomPlayer({
       if (controlsHideTimeoutRef.current !== null) {
         window.clearTimeout(controlsHideTimeoutRef.current);
       }
+      detachSubtitleTrackListeners();
+      revokeSubtitleUrl();
       cleanupPeer();
       revokeObjectUrl();
       void clearTempCache();
     };
   }, []);
+
+  useEffect(() => {
+    if (!room.subtitleTrack) {
+      detachSubtitleTrackListeners();
+      revokeSubtitleUrl();
+      setIsCaptionsEnabled(false);
+      setActiveSubtitleLines([]);
+      return;
+    }
+
+    const subtitleContent =
+      room.subtitleTrack.format === "srt"
+        ? convertSrtToVtt(room.subtitleTrack.content)
+        : normalizeVttContent(room.subtitleTrack.content);
+    const nextUrl = URL.createObjectURL(new Blob([subtitleContent], { type: "text/vtt" }));
+
+    revokeSubtitleUrl();
+    subtitleObjectUrlRef.current = nextUrl;
+    setSubtitleUrl(nextUrl);
+    setIsCaptionsEnabled(true);
+
+    return () => {
+      if (subtitleObjectUrlRef.current === nextUrl) {
+        revokeSubtitleUrl();
+      }
+    };
+  }, [room.subtitleTrack]);
+
+  useEffect(() => {
+    syncSubtitleTrackMode();
+  }, [isCaptionsEnabled, subtitleUrl, mediaUrl]);
 
   useEffect(() => {
     const wrapper = videoRef.current?.closest(".local-player-wrapper");
@@ -438,6 +525,13 @@ export function LocalFileRoomPlayer({
         event.preventDefault();
         revealControls();
         void toggleFullscreen();
+        return;
+      }
+
+      if (key === "c") {
+        event.preventDefault();
+        revealControls();
+        handleClosedCaptionsAction();
         return;
       }
 
@@ -1386,6 +1480,7 @@ export function LocalFileRoomPlayer({
     }
 
     restorePendingPlayback(video, "loadedmetadata");
+    syncSubtitleTrackMode();
   }
 
   function handleTimeUpdate() {
@@ -1524,8 +1619,141 @@ export function LocalFileRoomPlayer({
     await wrapper.requestFullscreen();
   }
 
+  function revokeSubtitleUrl() {
+    if (!subtitleObjectUrlRef.current) {
+      setSubtitleUrl(null);
+      return;
+    }
+
+    URL.revokeObjectURL(subtitleObjectUrlRef.current);
+    subtitleObjectUrlRef.current = null;
+    setSubtitleUrl(null);
+  }
+
+  function detachSubtitleTrackListeners() {
+    for (const entry of subtitleTrackListenersRef.current) {
+      entry.track.removeEventListener("cuechange", entry.listener);
+    }
+
+    subtitleTrackListenersRef.current = [];
+  }
+
+  function syncActiveSubtitleLines() {
+    const video = videoRef.current;
+
+    if (!video || !subtitleUrl || !isCaptionsEnabled) {
+      setActiveSubtitleLines([]);
+      return;
+    }
+
+    const nextLines: string[] = [];
+
+    for (let trackIndex = 0; trackIndex < video.textTracks.length; trackIndex += 1) {
+      const activeCues = video.textTracks[trackIndex].activeCues;
+
+      if (!activeCues) {
+        continue;
+      }
+
+      for (let cueIndex = 0; cueIndex < activeCues.length; cueIndex += 1) {
+        const cue = activeCues[cueIndex];
+
+        if (!(cue instanceof VTTCue)) {
+          continue;
+        }
+
+        const text = cue.text
+          .split("\n")
+          .map((line: string) => line.trim())
+          .filter(Boolean);
+
+        nextLines.push(...text);
+      }
+    }
+
+    setActiveSubtitleLines(nextLines);
+  }
+
+  function syncSubtitleTrackMode() {
+    const video = videoRef.current;
+
+    if (!video) {
+      setActiveSubtitleLines([]);
+      return;
+    }
+
+    detachSubtitleTrackListeners();
+
+    for (let index = 0; index < video.textTracks.length; index += 1) {
+      const textTrack = video.textTracks[index];
+      textTrack.mode = isCaptionsEnabled && subtitleUrl ? "hidden" : "disabled";
+
+      if (isCaptionsEnabled && subtitleUrl) {
+        const listener = () => {
+          syncActiveSubtitleLines();
+        };
+
+        textTrack.addEventListener("cuechange", listener);
+        subtitleTrackListenersRef.current.push({ track: textTrack, listener });
+      }
+    }
+
+    syncActiveSubtitleLines();
+  }
+
+  function handleClosedCaptionsAction() {
+    subtitleInputRef.current?.click();
+  }
+
+  async function handleSubtitleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+
+    if (!file || !selfId) {
+      return;
+    }
+
+    const format = detectSubtitleFormat(file.name);
+
+    if (!format) {
+      updateLocalMessage("Use an .srt or .vtt subtitle file");
+      return;
+    }
+
+    try {
+      const content = await file.text();
+      const normalizedContent = content.trim();
+
+      if (!normalizedContent) {
+        updateLocalMessage("Subtitle file is empty");
+        return;
+      }
+
+      onSubtitleTrackChange({
+        fileName: file.name,
+        label: normalizeSubtitleLabel(file.name),
+        language: "en",
+        format,
+        content: normalizedContent,
+        uploadedAt: Date.now(),
+        uploadedByParticipantId: selfId
+      });
+      updateLocalMessage(`Subtitles synced: ${file.name}`);
+      setIsCaptionsEnabled(true);
+    } catch {
+      updateLocalMessage("Could not read subtitle file");
+    }
+  }
+
   return (
     <div className={`local-player-shell ${isTheaterMode ? "local-player-shell--theater" : ""}`}>
+      <input
+        ref={subtitleInputRef}
+        className="hidden-file-input"
+        type="file"
+        accept=".srt,.vtt,text/vtt,application/x-subrip"
+        onChange={handleSubtitleFileChange}
+      />
       <div
         className={`local-player-wrapper ${isFullscreenMode ? "local-player-wrapper--fullscreen" : ""}`}
         onMouseMove={revealControls}
@@ -1548,6 +1776,7 @@ export function LocalFileRoomPlayer({
               maybePromotePlaybackReady();
               maybeResumePendingSeek();
               restorePendingPlayback(video, "loadeddata");
+              syncSubtitleTrackMode();
             }
           }}
           onCanPlay={() => {
@@ -1560,6 +1789,7 @@ export function LocalFileRoomPlayer({
               maybePromotePlaybackReady();
               maybeResumePendingSeek();
               restorePendingPlayback(video, "canplay");
+              syncSubtitleTrackMode();
             }
           }}
           onError={() => {
@@ -1589,7 +1819,35 @@ export function LocalFileRoomPlayer({
           onDoubleClick={() => {
             void toggleFullscreen();
           }}
-        />
+        >
+          {subtitleUrl && room.subtitleTrack ? (
+            <track
+              key={`${room.subtitleTrack.uploadedAt}-${room.subtitleTrack.fileName}`}
+              kind="subtitles"
+              src={subtitleUrl}
+              srcLang={room.subtitleTrack.language}
+              label={room.subtitleTrack.label}
+              default={isCaptionsEnabled}
+              onLoad={() => {
+                syncSubtitleTrackMode();
+              }}
+            />
+          ) : null}
+        </video>
+        {activeSubtitleLines.length > 0 ? (
+          <div
+            className={`local-player-subtitle-overlay ${
+              isPointerActive ? "local-player-subtitle-overlay--controls-visible" : "local-player-subtitle-overlay--controls-hidden"
+            }`}
+            aria-live="off"
+          >
+            {activeSubtitleLines.map((line, index) => (
+              <span key={`${index}-${line}`} className="local-player-subtitle-line">
+                {line}
+              </span>
+            ))}
+          </div>
+        ) : null}
         {showLoadingOverlay ? (
           <div className="local-player-loading-overlay" aria-live="polite">
             <div className="local-player-loading-content">
@@ -1750,10 +2008,16 @@ export function LocalFileRoomPlayer({
                     <TheaterIcon />
                   </button>
                   <button
-                    className="local-player-toolbar-button local-player-toolbar-button--icon"
+                    className={`local-player-toolbar-button local-player-toolbar-button--icon ${
+                      hasSubtitleTrack && isCaptionsEnabled ? "local-player-toolbar-button--active" : ""
+                    }`}
                     type="button"
-                    aria-label="Closed captions"
-                    title="Closed captions (C)"
+                    onClick={() => {
+                      revealControls();
+                      handleClosedCaptionsAction();
+                    }}
+                    aria-label={hasSubtitleTrack ? "Replace subtitles" : "Upload subtitles"}
+                    title={subtitleButtonTitle}
                   >
                     <ClosedCaptionsIcon />
                   </button>

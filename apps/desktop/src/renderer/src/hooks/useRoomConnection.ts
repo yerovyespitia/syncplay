@@ -6,6 +6,7 @@ import type {
   Participant,
   RoomState,
   ServerEvent,
+  SubtitleTrack,
   TransferState
 } from "@syncplay/shared";
 import { normalizeRoomId } from "@syncplay/shared";
@@ -141,6 +142,7 @@ export function useRoomConnection() {
       case "transfer_state_updated":
       case "local_file_ready":
       case "local_file_buffering":
+      case "subtitle_track_updated":
         setRoom(event.payload.room);
         return;
       case "sync_snapshot":
@@ -437,6 +439,23 @@ export function useRoomConnection() {
     [room, send]
   );
 
+  const updateSubtitleTrack = useCallback(
+    (subtitleTrack: SubtitleTrack) => {
+      if (!room) {
+        return;
+      }
+
+      send({
+        type: "update_subtitle_track",
+        payload: {
+          roomId: room.roomId,
+          subtitleTrack
+        }
+      });
+    },
+    [room, send]
+  );
+
   const participants = useMemo<Participant[]>(() => room?.participants ?? [], [room]);
 
   return {
@@ -458,6 +477,7 @@ export function useRoomConnection() {
     requestSync,
     sendChatMessage,
     updateTransferState,
+    updateSubtitleTrack,
     sendPeerOffer,
     sendPeerAnswer,
     sendPeerIceCandidate,

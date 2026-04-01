@@ -5,6 +5,7 @@ import type {
   HostedFileMediaSource,
   PickedLocalFile,
   RoomState,
+  SubtitleTrack,
   TransferState,
   YoutubeMediaSource
 } from "@syncplay/shared";
@@ -70,6 +71,7 @@ interface RoomPanelProps {
   onPeerAnswer: (targetParticipantId: string, sdp: RTCSessionDescriptionInit) => void;
   onPeerIceCandidate: (targetParticipantId: string, candidate: RTCIceCandidateInit) => void;
   onTransferState: (transferState: TransferState) => void;
+  onSubtitleTrackChange: (subtitleTrack: SubtitleTrack) => void;
 }
 
 function CodeIcon() {
@@ -149,7 +151,8 @@ export function RoomPanel({
   onPeerOffer,
   onPeerAnswer,
   onPeerIceCandidate,
-  onTransferState
+  onTransferState,
+  onSubtitleTrackChange
 }: RoomPanelProps) {
   const [copied, setCopied] = useState(false);
   const [logsCopied, setLogsCopied] = useState(false);
@@ -334,6 +337,7 @@ export function RoomPanel({
               onPeerIceCandidate={onPeerIceCandidate}
               onTheaterModeChange={setIsTheaterMode}
               onTransferState={onTransferState}
+              onSubtitleTrackChange={onSubtitleTrackChange}
             />
           )}
         </div>
