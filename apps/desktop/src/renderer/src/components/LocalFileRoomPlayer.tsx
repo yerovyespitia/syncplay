@@ -236,6 +236,15 @@ function ExpandIcon() {
   );
 }
 
+function ClosedCaptionsIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <rect x="2" y="5" width="20" height="14" rx="2.5" fill="none" stroke="currentColor" strokeWidth="1.5" />
+      <text x="12.75" y="12" textAnchor="middle" dominantBaseline="central" fill="currentColor" stroke="currentColor" strokeWidth="0.6" fontSize="9.5" fontWeight="900" fontFamily="sans-serif" letterSpacing="1.5">CC</text>
+    </svg>
+  );
+}
+
 function TheaterIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
@@ -1739,6 +1748,14 @@ export function LocalFileRoomPlayer({
                     title={`${isTheaterMode ? "Exit theater mode" : "Enter theater mode"} (T)`}
                   >
                     <TheaterIcon />
+                  </button>
+                  <button
+                    className="local-player-toolbar-button local-player-toolbar-button--icon"
+                    type="button"
+                    aria-label="Closed captions"
+                    title="Closed captions (C)"
+                  >
+                    <ClosedCaptionsIcon />
                   </button>
                   <button
                     className="local-player-toolbar-button local-player-toolbar-button--icon"
