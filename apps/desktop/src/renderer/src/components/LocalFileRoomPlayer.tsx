@@ -509,6 +509,7 @@ export function LocalFileRoomPlayer({
   const lastReportedTransferRef = useRef<TransferState | null>(null);
   const localMessageRef = useRef("Waiting for peer connection");
   const controlsHideTimeoutRef = useRef<number | null>(null);
+  const lastAudibleVolumeRef = useRef(1);
   const subtitleInputRef = useRef<HTMLInputElement | null>(null);
   const subtitleObjectUrlRef = useRef<string | null>(null);
   const subtitleMenuRef = useRef<HTMLDivElement | null>(null);
@@ -2397,6 +2398,10 @@ export function LocalFileRoomPlayer({
       return;
     }
 
+    if (video.volume > 0) {
+      lastAudibleVolumeRef.current = video.volume;
+    }
+
     setIsMuted(video.muted);
     setVolume(video.volume);
   }
@@ -2492,6 +2497,9 @@ export function LocalFileRoomPlayer({
     const nextVolume = Number(event.target.value);
     video.volume = nextVolume;
     video.muted = nextVolume === 0;
+    if (nextVolume > 0) {
+      lastAudibleVolumeRef.current = nextVolume;
+    }
     setVolume(nextVolume);
     setIsMuted(video.muted);
   }
@@ -2503,7 +2511,17 @@ export function LocalFileRoomPlayer({
       return;
     }
 
-    video.muted = !video.muted;
+    if (video.muted || video.volume === 0) {
+      const restoredVolume = video.volume === 0 ? 1 : lastAudibleVolumeRef.current > 0 ? lastAudibleVolumeRef.current : 1;
+      video.volume = restoredVolume;
+      video.muted = false;
+      setVolume(restoredVolume);
+      setIsMuted(false);
+      return;
+    }
+
+    lastAudibleVolumeRef.current = video.volume > 0 ? video.volume : lastAudibleVolumeRef.current;
+    video.muted = true;
     setIsMuted(video.muted);
   }
 
@@ -2732,9 +2750,6 @@ export function LocalFileRoomPlayer({
           onSeeked={handleSeeked}
           onTimeUpdate={handleTimeUpdate}
           onVolumeChange={handleVolumeChange}
-          onClick={() => {
-            togglePlayback();
-          }}
           onDoubleClick={() => {
             void toggleFullscreen();
           }}
