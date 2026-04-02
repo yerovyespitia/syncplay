@@ -132,6 +132,22 @@ interface PendingPlaybackRestore {
   shouldPlay: boolean;
 }
 
+type BrowserFileSystemWritable = {
+  write(data: BufferSource | Blob | string | { type: "write"; position?: number; data: BufferSource | Blob | string }): Promise<void>;
+  seek(position: number): Promise<void>;
+  close(): Promise<void>;
+};
+
+type BrowserFileSystemFileHandle = {
+  createWritable(options?: { keepExistingData?: boolean }): Promise<BrowserFileSystemWritable>;
+  getFile(): Promise<File>;
+};
+
+type BrowserFileSystemDirectoryHandle = {
+  getFileHandle(name: string, options?: { create?: boolean }): Promise<BrowserFileSystemFileHandle>;
+  removeEntry(name: string): Promise<void>;
+};
+
 const fallbackDesktopApi = {
   createTempMediaCache: async () => ({
     cacheId: "",
@@ -148,6 +164,75 @@ const fallbackDesktopApi = {
   }),
   removeTempMediaCache: async () => undefined
 };
+
+const LOCAL_MEDIA_DB_NAME = "syncplay-local-media";
+const LOCAL_MEDIA_DB_VERSION = 2;
+const LOCAL_MEDIA_CHUNK_STORE = "media-chunks";
+const LOCAL_MEDIA_META_STORE = "media-meta";
+const LOCAL_MEDIA_FILE_STORE = "media-files";
+
+type StoredLocalMediaMeta = {
+  mediaId: string;
+  fileName: string;
+  fileSize: number;
+  mimeType: string;
+  updatedAt: number;
+};
+
+let localMediaDbPromise: Promise<IDBDatabase> | null = null;
+
+function openLocalMediaDb() {
+  if (localMediaDbPromise) {
+    return localMediaDbPromise;
+  }
+
+  localMediaDbPromise = new Promise((resolve, reject) => {
+    const request = window.indexedDB.open(LOCAL_MEDIA_DB_NAME, LOCAL_MEDIA_DB_VERSION);
+
+    request.onupgradeneeded = () => {
+      const database = request.result;
+
+      if (!database.objectStoreNames.contains(LOCAL_MEDIA_CHUNK_STORE)) {
+        const chunkStore = database.createObjectStore(LOCAL_MEDIA_CHUNK_STORE, {
+          keyPath: ["mediaId", "startByte"]
+        });
+        chunkStore.createIndex("byMediaId", "mediaId", { unique: false });
+      }
+
+      if (!database.objectStoreNames.contains(LOCAL_MEDIA_META_STORE)) {
+        database.createObjectStore(LOCAL_MEDIA_META_STORE, {
+          keyPath: "mediaId"
+        });
+      }
+
+      if (!database.objectStoreNames.contains(LOCAL_MEDIA_FILE_STORE)) {
+        database.createObjectStore(LOCAL_MEDIA_FILE_STORE, {
+          keyPath: "mediaId"
+        });
+      }
+    };
+
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error ?? new Error("Failed to open local media database"));
+  });
+
+  return localMediaDbPromise;
+}
+
+function idbRequestToPromise<T>(request: IDBRequest<T>) {
+  return new Promise<T>((resolve, reject) => {
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error ?? new Error("IndexedDB request failed"));
+  });
+}
+
+function idbTransactionDone(transaction: IDBTransaction) {
+  return new Promise<void>((resolve, reject) => {
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error ?? new Error("IndexedDB transaction failed"));
+    transaction.onabort = () => reject(transaction.error ?? new Error("IndexedDB transaction aborted"));
+  });
+}
 
 function formatMediaTitle(fileName: string) {
   const withoutExtension = fileName.replace(/\.[^/.]+$/, "");
@@ -178,6 +263,12 @@ function normalizeSubtitleLabel(fileName: string) {
   return fileName.replace(/\.[^/.]+$/, "").replace(/[_-]+/g, " ").trim() || "Custom subtitles";
 }
 
+function toBlobPart(bytes: Uint8Array) {
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  return copy;
+}
+
 function normalizeVttContent(content: string) {
   const normalized = content.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
   return normalized.startsWith("WEBVTT") ? normalized : `WEBVTT\n\n${normalized}`;
@@ -195,6 +286,20 @@ function convertSrtToVtt(content: string) {
   return `WEBVTT\n\n${normalized}`;
 }
 
+function decodeSubtitleContent(bytes: Uint8Array) {
+  const utf8 = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+
+  if (!utf8.includes("\uFFFD")) {
+    return utf8;
+  }
+
+  const windows1252 = new TextDecoder("windows-1252").decode(bytes);
+  const utf8ReplacementCount = (utf8.match(/\uFFFD/g) ?? []).length;
+  const windows1252ReplacementCount = (windows1252.match(/\uFFFD/g) ?? []).length;
+
+  return windows1252ReplacementCount <= utf8ReplacementCount ? windows1252 : utf8;
+}
+
 function isEditableTarget(target: EventTarget | null) {
   if (!(target instanceof HTMLElement)) {
     return false;
@@ -202,6 +307,42 @@ function isEditableTarget(target: EventTarget | null) {
 
   const tagName = target.tagName;
   return target.isContentEditable || tagName === "INPUT" || tagName === "TEXTAREA" || tagName === "SELECT";
+}
+
+function readChunkBytesFromEntries(chunkEntries: Array<[number, Uint8Array]>, startByte: number, length: number) {
+  if (length <= 0) {
+    return new Uint8Array(0);
+  }
+
+  const result = new Uint8Array(length);
+  let offset = startByte;
+  let written = 0;
+
+  for (const [chunkStart, bytes] of chunkEntries) {
+    const chunkEnd = chunkStart + bytes.byteLength;
+
+    if (chunkEnd <= offset) {
+      continue;
+    }
+
+    if (chunkStart > offset) {
+      break;
+    }
+
+    const localStart = Math.max(0, offset - chunkStart);
+    const remaining = length - written;
+    const localEnd = Math.min(bytes.byteLength, localStart + remaining);
+    const slice = bytes.subarray(localStart, localEnd);
+    result.set(slice, written);
+    written += slice.byteLength;
+    offset = chunkStart + localEnd;
+
+    if (written >= length) {
+      break;
+    }
+  }
+
+  return written === length ? result : null;
 }
 
 function PlayIcon() {
@@ -331,7 +472,7 @@ export function LocalFileRoomPlayer({
   const lastAppliedEventIdRef = useRef(-1);
   const activePeerIdRef = useRef<string | null>(null);
   const pendingIceCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
-  const pendingChunkMetaRef = useRef<ByteRange | null>(null);
+  const pendingChunkMetaQueueRef = useRef<ByteRange[]>([]);
   const availableRangesRef = useRef<ByteRange[]>([]);
   const contiguousBytesRef = useRef(0);
   const inFlightRequestsRef = useRef<Array<ByteRange & { reason: RangeRequestReason; targetTime?: number }>>([]);
@@ -341,7 +482,25 @@ export function LocalFileRoomPlayer({
   const cacheFileUrlRef = useRef<string | null>(null);
   const mediaUrlCandidatesRef = useRef<string[]>([]);
   const activeMediaUrlIndexRef = useRef(-1);
+  const guestBrowserDirectoryRef = useRef<BrowserFileSystemDirectoryHandle | null>(null);
+  const guestBrowserFileHandleRef = useRef<BrowserFileSystemFileHandle | null>(null);
+  const guestBrowserWritableRef = useRef<BrowserFileSystemWritable | null>(null);
+  const guestBrowserFileNameRef = useRef<string | null>(null);
+  const guestBrowserChunkMapRef = useRef<Map<number, Uint8Array>>(new Map());
+  const guestBrowserMediaUrlRef = useRef<string | null>(null);
+  const pendingBinaryChunkTaskRef = useRef<Promise<void>>(Promise.resolve());
+  const pendingGuestBrowserPersistenceTaskRef = useRef<Promise<void>>(Promise.resolve());
+  const guestBrowserPersistenceErrorRef = useRef<string | null>(null);
+  const guestBrowserMetaStoredRef = useRef(false);
+  const guestBrowserPlaybackChunksStoredRef = useRef(false);
+  const guestBrowserStoragePersistentRef = useRef(false);
+  const guestBrowserStoragePersistenceAttemptedRef = useRef(false);
+  const guestBrowserFallbackToMemoryRef = useRef(false);
+  const guestBrowserPersistedFileRef = useRef<File | null>(null);
+  const guestBrowserPersistedBytesRef = useRef(0);
   const pendingSeekTimeRef = useRef<number | undefined>(undefined);
+  const ignoredProgrammaticSeekTimeRef = useRef<number | undefined>(undefined);
+  const dispatchedLocalSeekTimeRef = useRef<number | undefined>(undefined);
   const reconnectAttemptRef = useRef(0);
   const preparingHostMediaRef = useRef(false);
   const durationRef = useRef(room.mediaSource.duration ?? 0);
@@ -399,6 +558,62 @@ export function LocalFileRoomPlayer({
   }, [debugRole, room.roomId]);
 
   useEffect(() => {
+    if (isHost || window.syncplayDesktop || !("serviceWorker" in navigator)) {
+      return;
+    }
+
+    function handleServiceWorkerMessage(event: MessageEvent) {
+      const message = event.data as
+        | { type: "syncplay-local-media-meta"; mediaId: string }
+        | { type: "syncplay-local-media-range"; mediaId: string; startByte: number; endByte: number }
+        | undefined;
+
+      if (!message || message.mediaId !== room.mediaSource.mediaId) {
+        return;
+      }
+
+      const responsePort = event.ports[0];
+
+      if (!responsePort) {
+        return;
+      }
+
+      if (message.type === "syncplay-local-media-meta") {
+        responsePort.postMessage({
+          ok: contiguousBytesRef.current >= room.mediaSource.fileSize,
+          fileName: room.mediaSource.fileName,
+          fileSize: room.mediaSource.fileSize,
+          mimeType: room.mediaSource.mimeType
+        });
+        return;
+      }
+
+      const length = message.endByte - message.startByte + 1;
+      const chunkEntries = Array.from(guestBrowserChunkMapRef.current.entries()).sort((left, right) => left[0] - right[0]);
+      const bytes = readChunkBytesFromEntries(chunkEntries, message.startByte, length);
+
+      if (!bytes) {
+        responsePort.postMessage({ ok: false });
+        return;
+      }
+
+      responsePort.postMessage(
+        {
+          ok: true,
+          bytes: bytes.buffer
+        },
+        [bytes.buffer]
+      );
+    }
+
+    navigator.serviceWorker.addEventListener("message", handleServiceWorkerMessage);
+
+    return () => {
+      navigator.serviceWorker.removeEventListener("message", handleServiceWorkerMessage);
+    };
+  }, [isHost, room.mediaSource.fileName, room.mediaSource.fileSize, room.mediaSource.mediaId, room.mediaSource.mimeType]);
+
+  useEffect(() => {
     if (showLoadingOverlay) {
       const video = videoRef.current;
       if (video) {
@@ -421,7 +636,9 @@ export function LocalFileRoomPlayer({
       revokeSubtitleUrl();
       cleanupPeer();
       revokeObjectUrl();
+      revokeGuestBrowserMediaUrl();
       void clearTempCache();
+      void clearGuestBrowserCache();
     };
   }, []);
 
@@ -455,6 +672,36 @@ export function LocalFileRoomPlayer({
   useEffect(() => {
     syncSubtitleTrackMode();
   }, [isCaptionsEnabled, subtitleUrl, mediaUrl]);
+
+  useEffect(() => {
+    const video = videoRef.current;
+
+    if (!video) {
+      return;
+    }
+
+    const textTracks = video.textTracks;
+    const handleTrackListChange = () => {
+      syncSubtitleTrackMode();
+    };
+    const handleCueRefresh = () => {
+      syncActiveSubtitleLines();
+    };
+
+    textTracks.addEventListener("addtrack", handleTrackListChange);
+    textTracks.addEventListener("change", handleTrackListChange);
+    textTracks.addEventListener("removetrack", handleTrackListChange);
+    video.addEventListener("seeked", handleCueRefresh);
+    video.addEventListener("timeupdate", handleCueRefresh);
+
+    return () => {
+      textTracks.removeEventListener("addtrack", handleTrackListChange);
+      textTracks.removeEventListener("change", handleTrackListChange);
+      textTracks.removeEventListener("removetrack", handleTrackListChange);
+      video.removeEventListener("seeked", handleCueRefresh);
+      video.removeEventListener("timeupdate", handleCueRefresh);
+    };
+  }, [mediaUrl, subtitleUrl, isCaptionsEnabled]);
 
   useEffect(() => {
     if (!isSubtitleMenuOpen) {
@@ -678,7 +925,7 @@ export function LocalFileRoomPlayer({
         }
 
         const bytes = await desktopApi.readLocalFile(pickedFile.fileId);
-        const content = new TextDecoder().decode(bytes).trim();
+        const content = decodeSubtitleContent(bytes).trim();
         const format = detectSubtitleFormat(pickedFile.fileName);
 
         if (!format || !content) {
@@ -700,6 +947,43 @@ export function LocalFileRoomPlayer({
         updateLocalMessage(`Subtitles synced: ${pickedFile.fileName}`);
         return true;
       },
+      sampleGuestBytes: (startByte: number, length: number) => {
+        if (length <= 0) {
+          return [];
+        }
+
+        const chunkEntries = Array.from(guestBrowserChunkMapRef.current.entries()).sort((left, right) => left[0] - right[0]);
+        const result: number[] = [];
+        let offset = startByte;
+
+        for (const [chunkStart, bytes] of chunkEntries) {
+          const chunkEnd = chunkStart + bytes.byteLength;
+
+          if (chunkEnd <= offset) {
+            continue;
+          }
+
+          if (chunkStart > offset) {
+            break;
+          }
+
+          const localStart = Math.max(0, offset - chunkStart);
+          const remaining = length - result.length;
+          const localEnd = Math.min(bytes.byteLength, localStart + remaining);
+
+          for (let index = localStart; index < localEnd; index += 1) {
+            result.push(bytes[index] ?? 0);
+          }
+
+          offset = chunkStart + localEnd;
+
+          if (result.length >= length) {
+            break;
+          }
+        }
+
+        return result;
+      },
       getState: () => ({
         role: debugRole,
         roomId: room.roomId,
@@ -709,6 +993,12 @@ export function LocalFileRoomPlayer({
         cacheFileUrl: cacheFileUrlRef.current,
         mediaUrlCandidates: mediaUrlCandidatesRef.current,
         activeMediaUrlIndex: activeMediaUrlIndexRef.current,
+        guestBrowserFallbackToMemory: guestBrowserFallbackToMemoryRef.current,
+        guestBrowserPersistedBytes: guestBrowserPersistedBytesRef.current,
+        guestBrowserPersistedFileSize: guestBrowserPersistedFileRef.current?.size ?? null,
+        guestBrowserChunkCount: guestBrowserChunkMapRef.current.size,
+        guestBrowserFirstChunkStart:
+          Array.from(guestBrowserChunkMapRef.current.keys()).sort((left, right) => left - right)[0] ?? null,
         contiguousBytes: contiguousBytesRef.current,
         availableRanges: availableRangesRef.current,
         roomTransferState: room.transferState,
@@ -746,7 +1036,9 @@ export function LocalFileRoomPlayer({
       return;
     }
 
-    maybeActivateCompletedGuestMedia("room-transfer-complete");
+    void finalizeGuestBrowserMedia("room-transfer-complete").finally(() => {
+      maybeActivateCompletedGuestMedia("room-transfer-complete");
+    });
   }, [isHost, mediaUrl, room.mediaSource.fileSize, room.transferState?.bytesPersisted]);
 
   async function ensureTempCache() {
@@ -787,6 +1079,489 @@ export function LocalFileRoomPlayer({
     mediaUrlCandidatesRef.current = [];
     activeMediaUrlIndexRef.current = -1;
     await desktopApi.removeTempMediaCache(cacheId);
+  }
+
+  async function storeGuestBrowserMediaMeta() {
+    if (isHost || window.syncplayDesktop) {
+      return;
+    }
+
+    if (guestBrowserMetaStoredRef.current) {
+      return;
+    }
+
+    const database = await openLocalMediaDb();
+    const transaction = database.transaction([LOCAL_MEDIA_META_STORE], "readwrite");
+    const store = transaction.objectStore(LOCAL_MEDIA_META_STORE);
+    const meta: StoredLocalMediaMeta = {
+      mediaId: room.mediaSource.mediaId,
+      fileName: room.mediaSource.fileName,
+      fileSize: room.mediaSource.fileSize,
+      mimeType: room.mediaSource.mimeType,
+      updatedAt: Date.now()
+    };
+
+    store.put(meta);
+    await idbTransactionDone(transaction);
+    guestBrowserMetaStoredRef.current = true;
+  }
+
+  async function storeGuestBrowserChunk(startByte: number, chunk: Uint8Array) {
+    if (isHost || window.syncplayDesktop || chunk.byteLength === 0) {
+      return;
+    }
+
+    const database = await openLocalMediaDb();
+    const transaction = database.transaction([LOCAL_MEDIA_CHUNK_STORE], "readwrite");
+    const store = transaction.objectStore(LOCAL_MEDIA_CHUNK_STORE);
+
+    store.put({
+      mediaId: room.mediaSource.mediaId,
+      startByte,
+      endByte: startByte + chunk.byteLength,
+      bytes: toBlobPart(chunk).buffer
+    });
+    await idbTransactionDone(transaction);
+  }
+
+  async function persistGuestBrowserChunksForPlayback(orderedChunks: Array<[number, Uint8Array]>) {
+    if (isHost || window.syncplayDesktop || guestBrowserPlaybackChunksStoredRef.current) {
+      return;
+    }
+
+    const database = await openLocalMediaDb();
+    const transaction = database.transaction([LOCAL_MEDIA_CHUNK_STORE, LOCAL_MEDIA_META_STORE], "readwrite");
+    const chunkStore = transaction.objectStore(LOCAL_MEDIA_CHUNK_STORE);
+    const chunkIndex = chunkStore.index("byMediaId");
+    const cursorRequest = chunkIndex.openKeyCursor(IDBKeyRange.only(room.mediaSource.mediaId));
+
+    await new Promise<void>((resolve, reject) => {
+      cursorRequest.onsuccess = () => {
+        const cursor = cursorRequest.result;
+
+        if (!cursor) {
+          resolve();
+          return;
+        }
+
+        chunkStore.delete(cursor.primaryKey);
+        cursor.continue();
+      };
+
+      cursorRequest.onerror = () => reject(cursorRequest.error ?? new Error("Failed to clear local playback chunks"));
+    });
+
+    transaction.objectStore(LOCAL_MEDIA_META_STORE).put({
+      mediaId: room.mediaSource.mediaId,
+      fileName: room.mediaSource.fileName,
+      fileSize: room.mediaSource.fileSize,
+      mimeType: room.mediaSource.mimeType,
+      updatedAt: Date.now()
+    } satisfies StoredLocalMediaMeta);
+
+    const batchedParts: Uint8Array[] = [];
+    let batchStartByte = 0;
+    let batchSize = 0;
+    const maxBatchBytes = 8 * 1024 * 1024;
+
+    function flushBatch() {
+      if (batchedParts.length === 0) {
+        return;
+      }
+
+      const mergedBytes = new Uint8Array(batchSize);
+      let offset = 0;
+
+      for (const part of batchedParts) {
+        mergedBytes.set(part, offset);
+        offset += part.byteLength;
+      }
+
+      chunkStore.put({
+        mediaId: room.mediaSource.mediaId,
+        startByte: batchStartByte,
+        endByte: batchStartByte + mergedBytes.byteLength,
+        bytes: mergedBytes.buffer
+      });
+
+      batchedParts.length = 0;
+      batchSize = 0;
+    }
+
+    for (const [startByte, bytes] of orderedChunks) {
+      if (batchedParts.length === 0) {
+        batchStartByte = startByte;
+      }
+
+      if (batchSize > 0 && batchSize + bytes.byteLength > maxBatchBytes) {
+        flushBatch();
+        batchStartByte = startByte;
+      }
+
+      batchedParts.push(toBlobPart(bytes));
+      batchSize += bytes.byteLength;
+    }
+
+    flushBatch();
+    await idbTransactionDone(transaction);
+    guestBrowserPlaybackChunksStoredRef.current = true;
+  }
+
+  function enqueueGuestBrowserChunkPersistence(startByte: number, chunk: Uint8Array) {
+    if (isHost || window.syncplayDesktop || chunk.byteLength === 0) {
+      return;
+    }
+
+    const chunkCopy = toBlobPart(chunk);
+    pendingGuestBrowserPersistenceTaskRef.current = pendingGuestBrowserPersistenceTaskRef.current
+      .then(async () => {
+        await storeGuestBrowserMediaMeta();
+        await storeGuestBrowserChunk(startByte, chunkCopy);
+      })
+      .catch((error: unknown) => {
+        const formattedError = formatError(error);
+        guestBrowserPersistenceErrorRef.current =
+          typeof formattedError === "string" ? formattedError : `${formattedError.name}: ${formattedError.message}`;
+        reportLocalDebug("guest browser chunk persistence failed", {
+          startByte,
+          error: formattedError
+        });
+      });
+  }
+
+  async function waitForGuestBrowserChunkPersistence() {
+    try {
+      await pendingGuestBrowserPersistenceTaskRef.current;
+    } catch {
+      // Individual persistence failures are captured and logged above.
+    }
+
+    if (guestBrowserPersistenceErrorRef.current) {
+      throw new Error(guestBrowserPersistenceErrorRef.current);
+    }
+  }
+
+  async function storeGuestBrowserFile(file: File) {
+    if (isHost || window.syncplayDesktop) {
+      return;
+    }
+
+    debugLog(debugRole, "guest browser file persistence started", {
+      size: file.size,
+      type: file.type
+    });
+    const database = await openLocalMediaDb();
+    const transaction = database.transaction([LOCAL_MEDIA_FILE_STORE], "readwrite");
+    transaction.objectStore(LOCAL_MEDIA_FILE_STORE).put({
+      mediaId: room.mediaSource.mediaId,
+      file
+    });
+    await idbTransactionDone(transaction);
+    debugLog(debugRole, "guest browser file persistence completed", {
+      size: file.size
+    });
+  }
+
+  async function clearGuestBrowserStoredMedia() {
+    if (isHost || window.syncplayDesktop) {
+      return;
+    }
+
+    const database = await openLocalMediaDb();
+    const transaction = database.transaction([LOCAL_MEDIA_CHUNK_STORE, LOCAL_MEDIA_META_STORE, LOCAL_MEDIA_FILE_STORE], "readwrite");
+    const chunkStore = transaction.objectStore(LOCAL_MEDIA_CHUNK_STORE);
+    const chunkIndex = chunkStore.index("byMediaId");
+    const cursorRequest = chunkIndex.openKeyCursor(IDBKeyRange.only(room.mediaSource.mediaId));
+
+    await new Promise<void>((resolve, reject) => {
+      cursorRequest.onsuccess = () => {
+        const cursor = cursorRequest.result;
+
+        if (!cursor) {
+          resolve();
+          return;
+        }
+
+        chunkStore.delete(cursor.primaryKey);
+        cursor.continue();
+      };
+
+      cursorRequest.onerror = () => reject(cursorRequest.error ?? new Error("Failed to clear media chunks"));
+    });
+
+    transaction.objectStore(LOCAL_MEDIA_META_STORE).delete(room.mediaSource.mediaId);
+    transaction.objectStore(LOCAL_MEDIA_FILE_STORE).delete(room.mediaSource.mediaId);
+    await idbTransactionDone(transaction);
+  }
+
+  async function getGuestBrowserPlaybackUrl() {
+    if (isHost || window.syncplayDesktop) {
+      return null;
+    }
+
+    const registration = await window.__syncplayLocalMediaServiceWorkerReady;
+
+    if (!registration) {
+      return null;
+    }
+
+    return `/__syncplay-local-media/${encodeURIComponent(room.mediaSource.mediaId)}?updatedAt=${Date.now()}`;
+  }
+
+  async function ensureGuestBrowserWritable() {
+    if (isHost || window.syncplayDesktop) {
+      return null;
+    }
+
+    if (guestBrowserWritableRef.current) {
+      return guestBrowserWritableRef.current;
+    }
+
+    if (guestBrowserFallbackToMemoryRef.current) {
+      return null;
+    }
+
+    await ensureGuestBrowserStoragePersistence();
+
+    const storageDirectory = (navigator.storage as StorageManager & {
+      getDirectory?: () => Promise<BrowserFileSystemDirectoryHandle>;
+    }).getDirectory;
+
+    if (!storageDirectory) {
+      return null;
+    }
+
+    const directory = await storageDirectory.call(navigator.storage);
+    const fileName = `syncplay-${room.roomId}-${room.mediaSource.mediaId}.media`;
+    const fileHandle = await directory.getFileHandle(fileName, { create: true });
+    const writable = await fileHandle.createWritable({ keepExistingData: true });
+
+    guestBrowserDirectoryRef.current = directory;
+    guestBrowserFileHandleRef.current = fileHandle;
+    guestBrowserWritableRef.current = writable;
+    guestBrowserFileNameRef.current = fileName;
+    return writable;
+  }
+
+  async function ensureGuestBrowserStoragePersistence(force = false) {
+    if (isHost || window.syncplayDesktop) {
+      return guestBrowserStoragePersistentRef.current;
+    }
+
+    if (!force && guestBrowserStoragePersistenceAttemptedRef.current) {
+      return guestBrowserStoragePersistentRef.current;
+    }
+
+    guestBrowserStoragePersistenceAttemptedRef.current = true;
+
+    try {
+      const persistent = await navigator.storage.persist?.();
+      guestBrowserStoragePersistentRef.current = Boolean(persistent);
+      const estimate = await navigator.storage.estimate?.();
+      debugLog(debugRole, "guest browser storage status", {
+        persistent: guestBrowserStoragePersistentRef.current,
+        quota: estimate?.quota,
+        usage: estimate?.usage
+      });
+    } catch (error) {
+      debugLog(debugRole, "guest browser storage persistence failed", {
+        error: formatError(error)
+      });
+    }
+
+    return guestBrowserStoragePersistentRef.current;
+  }
+
+  async function persistGuestChunkInBrowser(startByte: number, chunk: Uint8Array) {
+    if (isHost || chunk.byteLength === 0) {
+      return;
+    }
+
+    const chunkCopy = toBlobPart(chunk);
+    guestBrowserChunkMapRef.current.set(startByte, chunkCopy);
+  }
+
+  async function finalizeGuestBrowserMedia(trigger: string) {
+    if (isHost || window.syncplayDesktop || guestBrowserMediaUrlRef.current) {
+      return guestBrowserMediaUrlRef.current;
+    }
+
+    const persistedBytes = Math.max(contiguousBytesRef.current, room.transferState?.bytesPersisted ?? 0);
+
+    if (persistedBytes < room.mediaSource.fileSize) {
+      return null;
+    }
+
+    await waitForGuestBrowserChunkPersistence();
+
+    if (guestBrowserPersistedFileRef.current) {
+      const persistedFile = guestBrowserPersistedFileRef.current;
+      const persistedBytes = guestBrowserPersistedBytesRef.current;
+      const orderedChunks = Array.from(guestBrowserChunkMapRef.current.entries()).sort((left, right) => left[0] - right[0]);
+      let expectedStartByte = persistedBytes;
+
+      for (const [startByte, bytes] of orderedChunks) {
+        if (startByte !== expectedStartByte) {
+          debugLog(debugRole, "guest browser mixed media finalization waiting for contiguous chunk", {
+            trigger,
+            expectedStartByte,
+            actualStartByte: startByte,
+            persistedBytes,
+            chunkCount: orderedChunks.length
+          });
+          return null;
+        }
+
+        expectedStartByte += bytes.byteLength;
+      }
+
+      if (expectedStartByte < room.mediaSource.fileSize) {
+        return null;
+      }
+
+      const nextFile = new File(
+        [persistedFile.slice(0, persistedBytes), ...orderedChunks.map(([, bytes]) => toBlobPart(bytes))],
+        room.mediaSource.fileName,
+        { type: room.mediaSource.mimeType }
+      );
+      const nextUrl = URL.createObjectURL(nextFile);
+      guestBrowserMediaUrlRef.current = nextUrl;
+      mediaUrlCandidatesRef.current = [...mediaUrlCandidatesRef.current, nextUrl];
+      debugLog(debugRole, "guest browser media finalized from mixed storage", {
+        trigger,
+        persistedBytes,
+        chunkCount: orderedChunks.length,
+        totalBytes: expectedStartByte
+      });
+      return nextUrl;
+    }
+
+    if (guestBrowserWritableRef.current && guestBrowserFileHandleRef.current) {
+      await guestBrowserWritableRef.current.close();
+      guestBrowserWritableRef.current = null;
+
+      const cachedFile = await guestBrowserFileHandleRef.current.getFile();
+      const nextUrl = URL.createObjectURL(cachedFile);
+      guestBrowserMediaUrlRef.current = nextUrl;
+      mediaUrlCandidatesRef.current = [...mediaUrlCandidatesRef.current, nextUrl];
+      debugLog(debugRole, "guest browser media finalized from file system", {
+        trigger,
+        size: cachedFile.size,
+        type: cachedFile.type || room.mediaSource.mimeType
+      });
+      return nextUrl;
+    }
+
+    const orderedChunks = Array.from(guestBrowserChunkMapRef.current.entries()).sort((left, right) => left[0] - right[0]);
+
+    if (orderedChunks.length === 0) {
+      return null;
+    }
+
+    let expectedStartByte = 0;
+
+    for (const [startByte, bytes] of orderedChunks) {
+      if (startByte !== expectedStartByte) {
+        return null;
+      }
+
+      expectedStartByte += bytes.byteLength;
+    }
+
+    if (expectedStartByte < room.mediaSource.fileSize) {
+      return null;
+    }
+
+    const nextFile = new File(
+      orderedChunks.map(([, bytes]) => toBlobPart(bytes)),
+      room.mediaSource.fileName,
+      { type: room.mediaSource.mimeType }
+    );
+    const playbackUrl = await getGuestBrowserPlaybackUrl();
+
+    if (playbackUrl) {
+      guestBrowserMediaUrlRef.current = playbackUrl;
+      mediaUrlCandidatesRef.current = [...mediaUrlCandidatesRef.current, playbackUrl];
+      debugLog(debugRole, "guest browser media finalized through service worker", {
+        trigger,
+        url: playbackUrl,
+        source: "memory"
+      });
+      return playbackUrl;
+    }
+
+    const nextUrl = URL.createObjectURL(nextFile);
+    guestBrowserMediaUrlRef.current = nextUrl;
+    mediaUrlCandidatesRef.current = [...mediaUrlCandidatesRef.current, nextUrl];
+    debugLog(debugRole, "guest browser media finalized from memory", {
+      trigger,
+      chunkCount: orderedChunks.length,
+      bytes: expectedStartByte
+    });
+    return nextUrl;
+  }
+
+  async function clearGuestBrowserCache() {
+    guestBrowserChunkMapRef.current.clear();
+    guestBrowserFallbackToMemoryRef.current = false;
+    guestBrowserPersistedFileRef.current = null;
+    guestBrowserPersistedBytesRef.current = 0;
+    guestBrowserPersistenceErrorRef.current = null;
+    guestBrowserMetaStoredRef.current = false;
+    guestBrowserPlaybackChunksStoredRef.current = false;
+    pendingGuestBrowserPersistenceTaskRef.current = Promise.resolve();
+
+    if (guestBrowserWritableRef.current) {
+      await guestBrowserWritableRef.current.close().catch(() => undefined);
+      guestBrowserWritableRef.current = null;
+    }
+
+    const directory = guestBrowserDirectoryRef.current;
+    const fileName = guestBrowserFileNameRef.current;
+
+    guestBrowserDirectoryRef.current = null;
+    guestBrowserFileHandleRef.current = null;
+    guestBrowserFileNameRef.current = null;
+
+    if (directory && fileName) {
+      await directory.removeEntry(fileName).catch(() => undefined);
+    }
+
+    await clearGuestBrowserStoredMedia().catch(() => undefined);
+  }
+
+  function revokeGuestBrowserMediaUrl() {
+    if (guestBrowserMediaUrlRef.current) {
+      if (guestBrowserMediaUrlRef.current.startsWith("blob:")) {
+        URL.revokeObjectURL(guestBrowserMediaUrlRef.current);
+      }
+      guestBrowserMediaUrlRef.current = null;
+    }
+  }
+
+  async function switchGuestBrowserStorageToMemoryFallback(safePersistedBytes = contiguousBytesRef.current) {
+    if (guestBrowserFallbackToMemoryRef.current) {
+      return;
+    }
+
+    const fileHandle = guestBrowserFileHandleRef.current;
+
+    if (guestBrowserWritableRef.current) {
+      await guestBrowserWritableRef.current.close().catch(() => undefined);
+      guestBrowserWritableRef.current = null;
+    }
+
+    if (fileHandle) {
+      const persistedFile = await fileHandle.getFile();
+      guestBrowserPersistedFileRef.current = persistedFile;
+      guestBrowserPersistedBytesRef.current = Math.max(0, Math.min(safePersistedBytes, persistedFile.size));
+    }
+
+    guestBrowserFallbackToMemoryRef.current = true;
+    debugLog(debugRole, "guest browser storage fell back to memory", {
+      safePersistedBytes: guestBrowserPersistedBytesRef.current,
+      fileSize: guestBrowserPersistedFileRef.current?.size ?? 0
+    });
   }
 
   function maybeActivateCompletedGuestMedia(trigger: string) {
@@ -958,7 +1733,13 @@ export function LocalFileRoomPlayer({
         return;
       }
 
-      void handleBinaryChunk(event.data);
+      pendingBinaryChunkTaskRef.current = pendingBinaryChunkTaskRef.current
+        .then(() => handleBinaryChunk(event.data))
+        .catch((error: unknown) => {
+          reportLocalDebug("binary chunk handling failed", {
+            error: formatError(error)
+          });
+        });
     };
 
     channel.onerror = () => {
@@ -1096,10 +1877,13 @@ export function LocalFileRoomPlayer({
         await sendRequestedRange(dataChannelRef.current, message);
         return;
       case "chunk-meta":
-        pendingChunkMetaRef.current = {
-          startByte: message.startByte,
-          endByte: message.endByte
-        };
+        pendingChunkMetaQueueRef.current = [
+          ...pendingChunkMetaQueueRef.current,
+          {
+            startByte: message.startByte,
+            endByte: message.endByte
+          }
+        ];
         return;
       case "range-complete":
         inFlightRequestsRef.current = inFlightRequestsRef.current.filter(
@@ -1208,19 +1992,21 @@ export function LocalFileRoomPlayer({
   }
 
   async function handleBinaryChunk(payload: Blob | ArrayBuffer) {
-    const range = pendingChunkMetaRef.current;
+    const range = pendingChunkMetaQueueRef.current[0];
 
     if (!range) {
       return;
     }
 
+    pendingChunkMetaQueueRef.current = pendingChunkMetaQueueRef.current.slice(1);
     const chunk = payload instanceof Blob ? new Uint8Array(await payload.arrayBuffer()) : new Uint8Array(payload);
-    pendingChunkMetaRef.current = null;
 
     const cacheHandle = await ensureTempCache();
     if (cacheHandle.cacheId) {
       await desktopApi.writeTempMediaChunk(cacheHandle.cacheId, range.startByte, chunk);
       await desktopApi.markTempMediaRangeAvailable(cacheHandle.cacheId, range.startByte, range.startByte + chunk.byteLength);
+    } else {
+      await persistGuestChunkInBrowser(range.startByte, chunk);
     }
 
     availableRangesRef.current = mergeRanges(availableRangesRef.current, {
@@ -1234,6 +2020,10 @@ export function LocalFileRoomPlayer({
         message: pendingSeekTimeRef.current !== undefined ? `Buffering at ${formatTime(pendingSeekTimeRef.current)}` : "Preparing playback"
       })
     );
+
+    if (contiguousBytesRef.current >= room.mediaSource.fileSize) {
+      await finalizeGuestBrowserMedia("all-bytes-persisted");
+    }
 
     maybeActivateCompletedGuestMedia("all-bytes-persisted");
     maybePromotePlaybackReady();
@@ -1500,6 +2290,29 @@ export function LocalFileRoomPlayer({
       return;
     }
 
+    const ignoredProgrammaticSeekTime = ignoredProgrammaticSeekTimeRef.current;
+    if (
+      ignoredProgrammaticSeekTime !== undefined &&
+      Math.abs(video.currentTime - ignoredProgrammaticSeekTime) <= 0.5
+    ) {
+      ignoredProgrammaticSeekTimeRef.current = undefined;
+      debugLog(debugRole, "handleSeeked ignored programmatic seek", {
+        currentTime: video.currentTime,
+        ignoredProgrammaticSeekTime
+      });
+      return;
+    }
+
+    const dispatchedLocalSeekTime = dispatchedLocalSeekTimeRef.current;
+    if (dispatchedLocalSeekTime !== undefined && Math.abs(video.currentTime - dispatchedLocalSeekTime) <= 0.5) {
+      dispatchedLocalSeekTimeRef.current = undefined;
+      debugLog(debugRole, "handleSeeked ignored already-dispatched local seek", {
+        currentTime: video.currentTime,
+        dispatchedLocalSeekTime
+      });
+      return;
+    }
+
     if (isHost) {
       debugLog(debugRole, "handleSeeked forwarding seek", {
         currentTime: video.currentTime
@@ -1629,6 +2442,11 @@ export function LocalFileRoomPlayer({
 
     video.currentTime = nextTime;
     setCurrentTime(nextTime);
+
+    if (isHost) {
+      dispatchedLocalSeekTimeRef.current = nextTime;
+      onSeek(nextTime);
+    }
   }
 
   function handleTimelineInput(event: React.ChangeEvent<HTMLInputElement>) {
@@ -1641,6 +2459,11 @@ export function LocalFileRoomPlayer({
     const nextTime = Number(event.target.value);
     video.currentTime = nextTime;
     setCurrentTime(nextTime);
+
+    if (isHost) {
+      dispatchedLocalSeekTimeRef.current = nextTime;
+      onSeek(nextTime);
+    }
   }
 
   function handleVolumeInput(event: React.ChangeEvent<HTMLInputElement>) {
@@ -1722,7 +2545,7 @@ export function LocalFileRoomPlayer({
       for (let cueIndex = 0; cueIndex < activeCues.length; cueIndex += 1) {
         const cue = activeCues[cueIndex];
 
-        if (!(cue instanceof VTTCue)) {
+        if (!cue || typeof cue !== "object" || !("text" in cue) || typeof cue.text !== "string") {
           continue;
         }
 
@@ -1800,8 +2623,8 @@ export function LocalFileRoomPlayer({
     }
 
     try {
-      const content = await file.text();
-      const normalizedContent = content.trim();
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const normalizedContent = decodeSubtitleContent(bytes).trim();
 
       if (!normalizedContent) {
         updateLocalMessage("Subtitle file is empty");
@@ -2183,6 +3006,7 @@ export function LocalFileRoomPlayer({
       pendingSeekTimeRef.current = authoritativeRoom.currentTime;
       requestNextRange("seek");
     } else if (Math.abs(video.currentTime - authoritativeRoom.currentTime) > DRIFT_THRESHOLD_SECONDS) {
+      ignoredProgrammaticSeekTimeRef.current = authoritativeRoom.currentTime;
       video.currentTime = authoritativeRoom.currentTime;
     }
 
@@ -2253,6 +3077,7 @@ export function LocalFileRoomPlayer({
       playableBufferedUntil
     });
 
+    ignoredProgrammaticSeekTimeRef.current = pendingPlaybackRestore.time;
     video.currentTime = pendingPlaybackRestore.time;
     setCurrentTime(pendingPlaybackRestore.time);
 
@@ -2448,7 +3273,9 @@ export function LocalFileRoomPlayer({
     peerRef.current = null;
     activePeerIdRef.current = null;
     pendingIceCandidatesRef.current = [];
-    pendingChunkMetaRef.current = null;
+    pendingChunkMetaQueueRef.current = [];
+    pendingBinaryChunkTaskRef.current = Promise.resolve();
+    pendingGuestBrowserPersistenceTaskRef.current = Promise.resolve();
     inFlightRequestsRef.current = [];
     window.setTimeout(() => {
       suppressDisconnectRef.current = false;

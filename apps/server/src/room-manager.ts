@@ -230,7 +230,8 @@ export class RoomManager {
       (nextState.mediaSource.type === "local_file" || nextState.mediaSource.type === "torrent_magnet") &&
       nextState.participants.length > 1 &&
       transferState.phase === "ready" &&
-      nextState.transferState?.phase !== "ready";
+      nextState.transferState?.phase !== "ready" &&
+      nextState.currentTime <= 0.25;
 
     record.state = {
       ...nextState,

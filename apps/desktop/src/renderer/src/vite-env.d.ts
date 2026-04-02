@@ -15,7 +15,9 @@ declare global {
     __syncplayLocalPlayerDebug?: {
       getState: () => unknown;
       uploadSubtitleByPath: (filePath: string) => Promise<boolean>;
+      sampleGuestBytes: (startByte: number, length: number) => number[];
     };
+    __syncplayLocalMediaServiceWorkerReady?: Promise<ServiceWorkerRegistration | null>;
   }
 }
 

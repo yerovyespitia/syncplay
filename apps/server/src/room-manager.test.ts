@@ -274,4 +274,45 @@ describe("RoomManager", () => {
     expect(room?.transferState?.phase).toBe("ready");
     expect(room?.transferState?.isPlaybackReady).toBeTrue();
   });
+
+  test("does not reset local-file playback to the beginning when the guest becomes ready after a seek", () => {
+    const manager = new RoomManager();
+    const created = manager.createRoom(localFileSource, participantA);
+    const joined = manager.joinRoom(created.room.roomId, participantB);
+
+    expect(joined.ok).toBeTrue();
+    if (!joined.ok) {
+      return;
+    }
+
+    manager.updateTransferState(created.room.roomId, {
+      phase: "streaming",
+      bytesReceived: localFileSource.fileSize,
+      bytesTotal: localFileSource.fileSize,
+      bytesPersisted: localFileSource.fileSize,
+      progress: 1,
+      isPlaybackReady: true,
+      availableRanges: [{ startByte: 0, endByte: localFileSource.fileSize }],
+      message: "Playback resumed"
+    });
+
+    manager.applyPlaybackAction(created.room.roomId, participantA.id, "player_play", 1.5);
+    manager.applyPlaybackAction(created.room.roomId, participantA.id, "player_seek", 11.5);
+
+    const room = manager.updateTransferState(created.room.roomId, {
+      phase: "ready",
+      bytesReceived: localFileSource.fileSize,
+      bytesTotal: localFileSource.fileSize,
+      bytesPersisted: localFileSource.fileSize,
+      progress: 1,
+      isPlaybackReady: true,
+      availableRanges: [{ startByte: 0, endByte: localFileSource.fileSize }],
+      message: "Ready to play"
+    });
+
+    expect(room?.currentTime).toBe(11.5);
+    expect(room?.playbackState).toBe("playing");
+    expect(room?.transferState?.phase).toBe("ready");
+    expect(room?.transferState?.isPlaybackReady).toBeTrue();
+  });
 });

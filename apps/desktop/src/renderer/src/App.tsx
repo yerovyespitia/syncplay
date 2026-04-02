@@ -210,9 +210,7 @@ export default function App() {
   } = useRoomConnection();
   const shouldShowDesktopBridgeWarning =
     !hasDesktopBridge &&
-    (sourceOption === "local_file" ||
-      sourceOption === "torrent_magnet" ||
-      (room !== null && (room.mediaSource.type === "local_file" || room.mediaSource.type === "torrent_magnet")));
+    (sourceOption === "torrent_magnet" || (room !== null && room.mediaSource.type === "torrent_magnet"));
 
   const parsedVideo = useMemo(() => parseYouTubeUrl(videoUrl), [videoUrl]);
   const canCreateRoom =
@@ -796,8 +794,8 @@ export default function App() {
 
       {shouldShowDesktopBridgeWarning ? (
         <section className="error-banner">
-          <strong>Desktop bridge missing:</strong> this window cannot use local-file rooms correctly. Open the app from
-          Electron, or use the in-app desktop-window button from a working desktop window.
+          <strong>Desktop bridge missing:</strong> magnet-link rooms require the Electron desktop app. Local-file rooms
+          can still work in the browser.
         </section>
       ) : null}
     </main>
