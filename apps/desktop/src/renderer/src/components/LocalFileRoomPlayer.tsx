@@ -81,6 +81,7 @@ const SEEK_RESUME_PADDING_SECONDS = 2;
 const TRANSFER_PROGRESS_BUCKET = 0.02;
 const BUFFERED_TIME_BUCKET_SECONDS = 5;
 const DRIFT_THRESHOLD_SECONDS = 1.2;
+const PLAYBACK_END_TOLERANCE_SECONDS = 0.35;
 const DATA_CHANNEL_HIGH_WATER_MARK = 4 * 1024 * 1024;
 const DATA_CHANNEL_LOW_WATER_MARK = 512 * 1024;
 const ICE_SERVERS: RTCIceServer[] = [{ urls: "stun:stun.l.google.com:19302" }];
@@ -507,6 +508,7 @@ export function LocalFileRoomPlayer({
   const pendingPlaybackRestoreRef = useRef<PendingPlaybackRestore | null>(null);
   const suppressDisconnectRef = useRef(false);
   const lastReportedTransferRef = useRef<TransferState | null>(null);
+  const skipNextLocalPlayEventRef = useRef(false);
   const localMessageRef = useRef("Waiting for peer connection");
   const controlsHideTimeoutRef = useRef<number | null>(null);
   const lastAudibleVolumeRef = useRef(1);
@@ -2227,6 +2229,14 @@ export function LocalFileRoomPlayer({
       return;
     }
 
+    if (skipNextLocalPlayEventRef.current) {
+      skipNextLocalPlayEventRef.current = false;
+      debugLog(debugRole, "handlePlay ignored duplicate restart play", {
+        currentTime: video.currentTime
+      });
+      return;
+    }
+
     const bufferedUntilTime = isHost ? Number.POSITIVE_INFINITY : getPlayableBufferedUntil(video);
 
     if (!isHost && !hasCurrentPlayableData(video)) {
@@ -2439,6 +2449,11 @@ export function LocalFileRoomPlayer({
     }
 
     if (video.paused) {
+      if (isPlaybackAtEnd(video, durationRef.current)) {
+        restartPlaybackFromBeginning(video, { shouldResume: true });
+        return;
+      }
+
       void video.play();
       return;
     }
@@ -2468,6 +2483,40 @@ export function LocalFileRoomPlayer({
       dispatchedLocalSeekTimeRef.current = nextTime;
       onSeek(nextTime);
     }
+  }
+
+  function restartPlaybackFromBeginning(video: HTMLVideoElement, options?: { shouldResume?: boolean }) {
+    const restartTime = 0;
+
+    if (Math.abs(video.currentTime - restartTime) <= 0.05) {
+      if (options?.shouldResume) {
+        resumePlaybackAfterRestart(video, restartTime);
+      }
+      return;
+    }
+
+    dispatchedLocalSeekTimeRef.current = restartTime;
+    pendingSeekTimeRef.current = undefined;
+    video.currentTime = restartTime;
+    setCurrentTime(restartTime);
+    onSeek(restartTime);
+
+    if (options?.shouldResume) {
+      window.setTimeout(() => {
+        if (videoRef.current !== video) {
+          return;
+        }
+
+        resumePlaybackAfterRestart(video, restartTime);
+      }, 0);
+    }
+  }
+
+  function resumePlaybackAfterRestart(video: HTMLVideoElement, restartTime: number) {
+    skipNextLocalPlayEventRef.current = true;
+    setIsPlaying(true);
+    onPlay(restartTime);
+    void video.play();
   }
 
   function handleTimelineInput(event: React.ChangeEvent<HTMLInputElement>) {
@@ -3414,6 +3463,16 @@ function estimateByteOffset(targetTime: number, duration: number, totalBytes: nu
   }
 
   return Math.max(0, Math.min(totalBytes, Math.floor((targetTime / duration) * totalBytes)));
+}
+
+function isPlaybackAtEnd(video: HTMLVideoElement, fallbackDuration: number) {
+  const effectiveDuration = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : fallbackDuration;
+
+  if (!Number.isFinite(effectiveDuration) || effectiveDuration <= 0) {
+    return video.ended;
+  }
+
+  return video.ended || video.currentTime >= effectiveDuration - PLAYBACK_END_TOLERANCE_SECONDS;
 }
 
 function formatTime(totalSeconds: number) {
