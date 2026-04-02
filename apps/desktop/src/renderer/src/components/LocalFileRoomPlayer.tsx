@@ -864,6 +864,22 @@ export function LocalFileRoomPlayer({
     }
 
     if (remoteCommand.kind === "event" && remoteCommand.actorId === selfId) {
+      const shouldReconcileSelfEvent =
+        video.paused !== (remoteCommand.room.playbackState === "paused") ||
+        Math.abs(video.currentTime - remoteCommand.room.currentTime) > DRIFT_THRESHOLD_SECONDS;
+
+      if (shouldReconcileSelfEvent) {
+        debugLog(debugRole, "reconciling self-authored event", {
+          action: remoteCommand.action,
+          roomPlaybackState: remoteCommand.room.playbackState,
+          roomCurrentTime: remoteCommand.room.currentTime,
+          localPlaybackState: video.paused ? "paused" : "playing",
+          localCurrentTime: video.currentTime,
+          lastEventId: remoteCommand.room.lastEventId
+        });
+        applyAuthoritativeState(video, remoteCommand.room);
+      }
+
       lastAppliedEventIdRef.current = remoteCommand.room.lastEventId;
       return;
     }
@@ -2995,11 +3011,24 @@ export function LocalFileRoomPlayer({
       localCurrentTime: video.currentTime,
       lastEventId: authoritativeRoom.lastEventId
     });
+    reportLocalDebug("applyAuthoritativeState", {
+      playbackState: authoritativeRoom.playbackState,
+      currentTime: authoritativeRoom.currentTime,
+      localCurrentTime: video.currentTime,
+      localPaused: video.paused,
+      lastEventId: authoritativeRoom.lastEventId
+    });
 
+    const canSeekThroughMediaSource =
+      isHost ||
+      Boolean(window.syncplayDesktop) ||
+      contiguousBytesRef.current >= room.mediaSource.fileSize ||
+      (room.transferState?.bytesPersisted ?? 0) >= room.mediaSource.fileSize;
     const playableBufferedUntil = isHost ? Number.POSITIVE_INFINITY : getPlayableBufferedUntil(video);
 
     if (
       !isHost &&
+      !canSeekThroughMediaSource &&
       playableBufferedUntil !== undefined &&
       authoritativeRoom.currentTime > playableBufferedUntil - 0.25
     ) {
@@ -3013,29 +3042,44 @@ export function LocalFileRoomPlayer({
     if (authoritativeRoom.playbackState === "playing") {
       const bufferedUntilTime = isHost ? Number.POSITIVE_INFINITY : getPlayableBufferedUntil(video);
 
-      if (!isHost && !hasCurrentPlayableData(video)) {
+      if (!isHost && !canSeekThroughMediaSource && !hasCurrentPlayableData(video)) {
         pendingPlaybackRestoreRef.current = {
           time: authoritativeRoom.currentTime,
           shouldPlay: true
         };
         pendingSeekTimeRef.current = authoritativeRoom.currentTime;
         requestNextRange("seek");
-      } else if (bufferedUntilTime !== undefined && authoritativeRoom.currentTime > bufferedUntilTime - 0.25) {
+      } else if (
+        !canSeekThroughMediaSource &&
+        bufferedUntilTime !== undefined &&
+        authoritativeRoom.currentTime > bufferedUntilTime - 0.25
+      ) {
         pendingSeekTimeRef.current = authoritativeRoom.currentTime;
         requestNextRange("seek");
       } else {
         void video
           .play()
-          .then(() => {
-            debugLog(debugRole, "authoritative play resolved", {
-              currentTime: video.currentTime
-            });
-          })
-          .catch((error: unknown) => {
-            debugLog(debugRole, "authoritative play rejected", {
-              error: formatError(error)
-            });
+        .then(() => {
+          debugLog(debugRole, "authoritative play resolved", {
+            currentTime: video.currentTime
           });
+          reportLocalDebug("authoritative play resolved", {
+            currentTime: video.currentTime,
+            paused: video.paused,
+            lastEventId: authoritativeRoom.lastEventId
+          });
+        })
+        .catch((error: unknown) => {
+          debugLog(debugRole, "authoritative play rejected", {
+            error: formatError(error)
+          });
+          reportLocalDebug("authoritative play rejected", {
+            error: formatError(error),
+            currentTime: video.currentTime,
+            paused: video.paused,
+            lastEventId: authoritativeRoom.lastEventId
+          });
+        });
       }
     } else {
       video.pause();
@@ -3053,8 +3097,14 @@ export function LocalFileRoomPlayer({
       return;
     }
 
+    const canSeekThroughMediaSource =
+      isHost ||
+      Boolean(window.syncplayDesktop) ||
+      contiguousBytesRef.current >= room.mediaSource.fileSize ||
+      (room.transferState?.bytesPersisted ?? 0) >= room.mediaSource.fileSize;
     const playableBufferedUntil = isHost ? Number.POSITIVE_INFINITY : getPlayableBufferedUntil(video);
     const canRestoreAtTarget =
+      canSeekThroughMediaSource ||
       pendingPlaybackRestore.time <= 0.25 ||
       playableBufferedUntil === undefined ||
       pendingPlaybackRestore.time <= playableBufferedUntil - 0.25;

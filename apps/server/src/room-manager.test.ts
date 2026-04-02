@@ -315,4 +315,42 @@ describe("RoomManager", () => {
     expect(room?.transferState?.phase).toBe("ready");
     expect(room?.transferState?.isPlaybackReady).toBeTrue();
   });
+
+  test("does not rewind playback when a lagging guest pauses after the room has advanced", () => {
+    const manager = new RoomManager();
+    const created = manager.createRoom(localFileSource, participantA);
+    const joined = manager.joinRoom(created.room.roomId, participantB);
+    const originalNow = Date.now;
+
+    expect(joined.ok).toBeTrue();
+    if (!joined.ok) {
+      return;
+    }
+
+    try {
+      let now = 10_000;
+      Date.now = () => now;
+
+      manager.updateTransferState(created.room.roomId, {
+        phase: "ready",
+        bytesReceived: localFileSource.fileSize,
+        bytesTotal: localFileSource.fileSize,
+        bytesPersisted: localFileSource.fileSize,
+        progress: 1,
+        isPlaybackReady: true,
+        availableRanges: [{ startByte: 0, endByte: localFileSource.fileSize }],
+        message: "Ready to play"
+      });
+
+      manager.applyPlaybackAction(created.room.roomId, participantA.id, "player_seek", 20);
+      now = 22_500;
+
+      const room = manager.applyPlaybackAction(created.room.roomId, participantB.id, "player_pause", 14);
+
+      expect(room?.room.currentTime).toBe(32.5);
+      expect(room?.room.playbackState).toBe("paused");
+    } finally {
+      Date.now = originalNow;
+    }
+  });
 });

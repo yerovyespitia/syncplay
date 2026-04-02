@@ -192,20 +192,23 @@ export class RoomManager {
       return null;
     }
 
+    const nextState = advanceRoomPlayback(record.state);
     const safeCurrentTime = clampPlaybackTime(currentTime);
+    const resolvedCurrentTime =
+      action === "player_seek" ? safeCurrentTime : Math.max(safeCurrentTime, nextState.currentTime);
     const playbackState = resolvePlaybackState(record.state.playbackState, action);
 
     record.state = {
-      ...record.state,
+      ...nextState,
       playbackState,
-      currentTime: safeCurrentTime,
+      currentTime: resolvedCurrentTime,
       updatedAt: Date.now(),
-      lastEventId: record.state.lastEventId + 1,
+      lastEventId: nextState.lastEventId + 1,
       participants: Array.from(record.participants.values()),
       transferState:
-        record.state.transferState && action === "player_play"
-          ? { ...record.state.transferState, phase: "streaming" }
-          : record.state.transferState
+        nextState.transferState && action === "player_play"
+          ? { ...nextState.transferState, phase: "streaming" }
+          : nextState.transferState
     };
 
     this.rooms.set(record.state.roomId, record);
