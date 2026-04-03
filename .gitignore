@@ -5,7 +5,8 @@ out
 .idea
 .vscode
 coverage
+apps/desktop/release
 apps/desktop/out
 apps/desktop/dist
 apps/desktop/dist-electron
-
+.env*

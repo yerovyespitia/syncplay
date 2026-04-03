@@ -9,6 +9,7 @@ import { pathToFileURL } from "node:url";
 import type { PickedLocalFile, TorrentMediaFile, TorrentSessionSummary } from "@syncplay/shared";
 import type * as WebTorrentNamespace from "webtorrent";
 
+const APP_NAME = "SyncPlay";
 const rendererUrl = process.env.ELECTRON_RENDERER_URL;
 const localFiles = new Map<string, LocalMediaHandle>();
 const isDevMode = !app.isPackaged || Boolean(rendererUrl);
@@ -37,6 +38,8 @@ protocol.registerSchemesAsPrivileged([
     }
   }
 ]);
+
+app.setName(APP_NAME);
 
 interface ByteRange {
   startByte: number;
@@ -109,6 +112,7 @@ function createWindow() {
     minHeight: 760,
     show: false,
     autoHideMenuBar: true,
+    title: APP_NAME,
     titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
     backgroundColor: "#0a0a0b",
     icon: resolveWindowIconPath(),

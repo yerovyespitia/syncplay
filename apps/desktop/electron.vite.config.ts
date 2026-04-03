@@ -16,6 +16,7 @@ export default defineConfig({
     plugins: [externalizeDepsPlugin()]
   },
   renderer: {
+    envDir: __dirname,
     plugins: [react()],
     resolve: {
       alias: {
@@ -24,4 +25,3 @@ export default defineConfig({
     }
   }
 });
-
