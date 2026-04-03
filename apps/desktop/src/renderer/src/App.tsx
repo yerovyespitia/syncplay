@@ -184,6 +184,7 @@ export default function App() {
   const [selectedLocalFile, setSelectedLocalFile] = useState<PickedLocalFile | WebTorrentSelectedFile | null>(null);
   const [selectedPlaybackFile, setSelectedPlaybackFile] = useState<SelectedTorrentFileSource | File | null>(null);
   const [torrentSession, setTorrentSession] = useState<TorrentSessionSummary | null>(null);
+  const [isTorrentFileSelectOpen, setIsTorrentFileSelectOpen] = useState(false);
   const [isResolvingMagnet, setIsResolvingMagnet] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -686,6 +687,11 @@ export default function App() {
                   <input
                     id="magnet-link"
                     className="text-input"
+                    name="syncplay-magnet-link"
+                    autoComplete="off"
+                    autoCorrect="off"
+                    autoCapitalize="none"
+                    spellCheck={false}
                     value={magnetLink}
                     onChange={(event) => {
                       if (torrentSession) {
@@ -709,26 +715,47 @@ export default function App() {
                       <label className="input-label" htmlFor="torrent-file">
                         Video file
                       </label>
-                      <select
-                        id="torrent-file"
-                        className="text-input"
-                        value={selectedLocalFile?.type === "torrent_magnet" ? String(torrentSession.selectedFileIndex ?? "") : ""}
-                        onChange={(event) => {
-                          const nextIndex = Number(event.target.value);
-                          if (Number.isFinite(nextIndex)) {
-                            void handleSelectTorrentFile(nextIndex);
-                          }
-                        }}
-                      >
-                        <option value="" disabled>
-                          Choose a video file
-                        </option>
-                        {torrentSession.files.map((file) => (
-                          <option key={file.index} value={file.index}>
-                            {file.name} ({Math.round(file.size / 1024 / 1024)} MB)
+                      <div className={`select-input-shell ${isTorrentFileSelectOpen ? "select-input-shell--open" : ""}`}>
+                        <select
+                          id="torrent-file"
+                          className="text-input"
+                          name="syncplay-torrent-file"
+                          value={selectedLocalFile?.type === "torrent_magnet" ? String(torrentSession.selectedFileIndex ?? "") : ""}
+                          onMouseDown={() => setIsTorrentFileSelectOpen(true)}
+                          onFocus={() => setIsTorrentFileSelectOpen(true)}
+                          onBlur={() => setIsTorrentFileSelectOpen(false)}
+                          onKeyDown={(event) => {
+                            if (
+                              event.key === " " ||
+                              event.key === "Enter" ||
+                              event.key === "ArrowDown" ||
+                              event.key === "ArrowUp"
+                            ) {
+                              setIsTorrentFileSelectOpen(true);
+                            }
+
+                            if (event.key === "Escape" || event.key === "Tab") {
+                              setIsTorrentFileSelectOpen(false);
+                            }
+                          }}
+                          onChange={(event) => {
+                            setIsTorrentFileSelectOpen(false);
+                            const nextIndex = Number(event.target.value);
+                            if (Number.isFinite(nextIndex)) {
+                              void handleSelectTorrentFile(nextIndex);
+                            }
+                          }}
+                        >
+                          <option value="" disabled>
+                            Choose a video file
                           </option>
-                        ))}
-                      </select>
+                          {torrentSession.files.map((file) => (
+                            <option key={file.index} value={file.index}>
+                              {file.name} ({Math.round(file.size / 1024 / 1024)} MB)
+                            </option>
+                          ))}
+                        </select>
+                      </div>
                     </>
                   ) : null}
                   <p className="helper-text">
@@ -752,6 +779,11 @@ export default function App() {
               <input
                 id="room-code"
                 className="text-input text-input-code"
+                name="syncplay-room-code"
+                autoComplete="off"
+                autoCorrect="off"
+                autoCapitalize="characters"
+                spellCheck={false}
                 value={roomCode}
                 onChange={(event) => setRoomCode(event.target.value.toUpperCase())}
                 placeholder="AB12CD"

@@ -405,7 +405,7 @@ button:disabled {
 .text-input:focus {
   outline: none;
   border-color: rgba(139, 92, 246, 0.5);
-  background: rgba(139, 92, 246, 0.04);
+  background-color: rgba(139, 92, 246, 0.04);
 }
 
 .text-input-code {
@@ -413,6 +413,47 @@ button:disabled {
   text-transform: uppercase;
   font-weight: 600;
   font-size: 1rem;
+}
+
+.select-input-shell {
+  position: relative;
+  width: 100%;
+}
+
+.select-input-shell::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: 18px;
+  width: 12px;
+  height: 12px;
+  pointer-events: none;
+  transform: translateY(-50%) rotate(0deg);
+  transform-origin: center;
+  transition: transform 130ms ease;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M3 4.5 6 7.5 9 4.5' fill='none' stroke='rgba(228,228,231,0.92)' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 12px 12px;
+}
+
+.select-input-shell--open::after {
+  transform: translateY(-50%) rotate(180deg);
+}
+
+.select-input-shell .text-input {
+  margin-bottom: 0;
+}
+
+select.text-input {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  padding-right: 54px;
+}
+
+select.text-input::-ms-expand {
+  display: none;
 }
 
 /* ── Buttons ──────────────────────────────────────────── */
