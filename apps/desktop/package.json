@@ -9,7 +9,7 @@
     "build": "electron-vite build",
     "dist": "bun run build && electron-builder",
     "dist:mac": "bun run build && electron-builder --mac",
-    "dist:win": "bun run build && electron-builder --win",
+    "dist:win": "bun run build && electron-builder --win nsis --x64",
     "dist:linux": "bun run build && electron-builder --linux",
     "check": "tsc --noEmit -p tsconfig.json"
   },
@@ -29,7 +29,15 @@
       "icon": "resources/icon.icns"
     },
     "win": {
-      "icon": "resources/icon.ico"
+      "icon": "resources/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
     },
     "linux": {
       "icon": "resources/icon.png",
