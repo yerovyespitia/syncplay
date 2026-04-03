@@ -516,6 +516,7 @@ export function LocalFileRoomPlayer({
   const pendingPlaybackRestoreRef = useRef<PendingPlaybackRestore | null>(null);
   const suppressDisconnectRef = useRef(false);
   const lastReportedTransferRef = useRef<TransferState | null>(null);
+  const remoteParticipantIdRef = useRef<string | null>(null);
   const skipNextLocalPlayEventRef = useRef(false);
   const localMessageRef = useRef("Waiting for peer connection");
   const controlsHideTimeoutRef = useRef<number | null>(null);
@@ -560,6 +561,18 @@ export function LocalFileRoomPlayer({
     () => room.participants.find((participant) => participant.id !== selfId)?.id ?? null,
     [room.participants, selfId]
   );
+
+  useEffect(() => {
+    remoteParticipantIdRef.current = remoteParticipantId;
+
+    if (remoteParticipantId) {
+      return;
+    }
+
+    cleanupPeer();
+    reconnectAttemptRef.current = 0;
+    updateLocalMessage(isHost ? "Waiting for peer connection" : "Waiting for host");
+  }, [isHost, remoteParticipantId]);
 
   useEffect(() => {
     debugLog(debugRole, "desktop bridge status", {
@@ -1884,7 +1897,7 @@ export function LocalFileRoomPlayer({
 
     if (isHost) {
       window.setTimeout(() => {
-        if (room.hostParticipantId === selfId) {
+        if (room.hostParticipantId === selfId && remoteParticipantIdRef.current === targetParticipantId) {
           void createHostPeer(targetParticipantId);
         }
       }, 600);

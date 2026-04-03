@@ -126,6 +126,13 @@ function getChatMessageClassName(message: ChatMessage, selfId: string | null) {
     classNames.push("chat-message--remote");
   }
 
+  if (
+    message.kind === "system" &&
+    (message.text === "Target participant is not available." || message.text.endsWith("left the room."))
+  ) {
+    classNames.push("chat-message--system-alert");
+  }
+
   return classNames.join(" ");
 }
 
@@ -168,6 +175,8 @@ export function RoomPanel({
     room.participants.length > 1 &&
     (room.mediaSource.type === "local_file" || room.mediaSource.type === "torrent_magnet") &&
     Boolean(room.transferState);
+  const isBufferingPlayback = room.transferState?.phase === "buffering";
+  const isResyncDisabled = isBufferingPlayback || room.participants.length <= 1;
   const playbackReadyPercent = room.transferState
     ? room.transferState.isPlaybackReady
       ? 100
@@ -175,6 +184,8 @@ export function RoomPanel({
     : 0;
   const showLoadingOverlay = shouldShowPlaybackReadiness && !room.transferState?.isPlaybackReady;
   const visibleChatMessages = useMemo(() => room.chatMessages, [room.chatMessages]);
+  const isAloneInRoom = room.participants.length <= 1;
+  const latestChatMessageId = visibleChatMessages[visibleChatMessages.length - 1]?.id ?? null;
 
   useEffect(() => {
     const chatList = chatMessageListRef.current;
@@ -187,7 +198,7 @@ export function RoomPanel({
       top: chatList.scrollHeight,
       behavior: "smooth"
     });
-  }, [visibleChatMessages]);
+  }, [latestChatMessageId, visibleChatMessages.length]);
 
   useEffect(() => {
     const playerCard = playerCardRef.current;
@@ -246,7 +257,7 @@ export function RoomPanel({
   function handleSendChatMessage() {
     const nextMessage = chatDraft.trim();
 
-    if (!nextMessage) {
+    if (!nextMessage || isAloneInRoom) {
       return;
     }
 
@@ -294,7 +305,7 @@ export function RoomPanel({
               Dev mode
             </button>
           ) : null}
-          <button className="action-button action-button--sync" onClick={onRequestSync} type="button">
+          <button className="action-button action-button--sync" onClick={onRequestSync} type="button" disabled={isResyncDisabled}>
             <RefreshIcon />
             Resync
           </button>
@@ -397,16 +408,22 @@ export function RoomPanel({
                   className="chat-composer-input"
                   value={chatDraft}
                   onChange={(event) => setChatDraft(event.target.value)}
+                  disabled={isAloneInRoom}
                   onKeyDown={(event) => {
                     if (event.key === "Enter" && !event.shiftKey) {
                       event.preventDefault();
                       handleSendChatMessage();
                     }
                   }}
-                  placeholder="Message the room"
+                  placeholder={isAloneInRoom ? "Wait for another participant to join" : "Message the room"}
                   maxLength={280}
                 />
-                <button className="action-button action-button--chat" type="button" onClick={handleSendChatMessage}>
+                <button
+                  className="action-button action-button--chat"
+                  type="button"
+                  onClick={handleSendChatMessage}
+                  disabled={isAloneInRoom}
+                >
                   Send
                 </button>
               </div>

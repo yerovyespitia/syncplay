@@ -73,6 +73,16 @@ function detectElectronVersion() {
   return match?.[1] ?? "Web";
 }
 
+function detectSafariBrowser() {
+  const userAgent = navigator.userAgent;
+  const vendor = navigator.vendor;
+  const isAppleVendor = /Apple/i.test(vendor);
+  const isSafariEngine = /Safari/i.test(userAgent);
+  const isExcludedBrowser = /Chrome|Chromium|CriOS|FxiOS|Firefox|EdgiOS|Edg|OPiOS|OPR|Android/i.test(userAgent);
+
+  return isAppleVendor && isSafariEngine && !isExcludedBrowser;
+}
+
 function formatConnectionLabel(status: string) {
   return status.charAt(0).toUpperCase() + status.slice(1);
 }
@@ -177,6 +187,7 @@ export default function App() {
   const torrentSessionProvider = useMemo(() => createTorrentSessionProvider(window.syncplayDesktop), []);
   const platformLabel = formatPlatformLabel(desktopApi.platform || detectPlatformLabel());
   const electronVersionLabel = desktopApi.electronVersion || detectElectronVersion();
+  const isSafariBrowser = useMemo(() => detectSafariBrowser(), []);
   const [sourceOption, setSourceOption] = useState<SourceOption>("youtube");
   const [videoUrl, setVideoUrl] = useState("");
   const [magnetLink, setMagnetLink] = useState("");
@@ -216,13 +227,14 @@ export default function App() {
     sendSeek
   } = useRoomConnection();
   const shouldShowMagnetSupportWarning = sourceOption === "torrent_magnet" && !torrentSessionProvider.isSupported;
+  const shouldBlockSafariMagnetFlow = sourceOption === "torrent_magnet" && isSafariBrowser;
 
   const parsedVideo = useMemo(() => parseYouTubeUrl(videoUrl), [videoUrl]);
   const canCreateRoom =
     sourceOption === "youtube"
       ? Boolean(parsedVideo)
       : sourceOption === "torrent_magnet"
-        ? selectedLocalFile?.type === "torrent_magnet"
+        ? !shouldBlockSafariMagnetFlow && selectedLocalFile?.type === "torrent_magnet"
         : selectedLocalFile?.type === "local_file";
   const canJoinRoom = Boolean(roomCode.trim());
 
@@ -388,6 +400,11 @@ export default function App() {
   }
 
   async function handleResolveMagnet() {
+    if (shouldBlockSafariMagnetFlow) {
+      setLocalError("Magnet links are limited in Safari. For the full experience, we recommend using Chrome.");
+      return;
+    }
+
     if (!magnetLink.trim()) {
       setLocalError("Paste a magnet link first.");
       return;
@@ -463,6 +480,11 @@ export default function App() {
     }
 
     if (sourceOption === "torrent_magnet") {
+      if (shouldBlockSafariMagnetFlow) {
+        setLocalError("Magnet-link rooms are disabled in Safari. For the full experience, we recommend using Chrome.");
+        return;
+      }
+
       if (!selectedLocalFile || selectedLocalFile.type !== "torrent_magnet") {
         setLocalError("Resolve the magnet link and choose a video file first.");
         return;
@@ -551,14 +573,18 @@ export default function App() {
                 <ConnectionStatusIcon status={connectionStatus} />
                 {formatConnectionLabel(connectionStatus)}
               </span>
-              <span className="pill pill-info">
-                <PlatformIcon platformLabel={platformLabel} />
-                {platformLabel}
-              </span>
-              <span className="pill pill-info">
-                <img src={electronIcon} alt="" aria-hidden="true" />
-                {electronVersionLabel}
-              </span>
+              {isDev ? (
+                <>
+                  <span className="pill pill-info">
+                    <PlatformIcon platformLabel={platformLabel} />
+                    {platformLabel}
+                  </span>
+                  <span className="pill pill-info">
+                    <img src={electronIcon} alt="" aria-hidden="true" />
+                    {electronVersionLabel}
+                  </span>
+                </>
+              ) : null}
               {hasDesktopBridge && isDev ? (
                 <button
                   className="desktop-icon-button"
@@ -705,11 +731,22 @@ export default function App() {
                     placeholder="magnet:?xt=urn:btih:..."
                   />
                   <div className="local-file-picker">
-                    <button className="secondary-button" type="button" onClick={handleResolveMagnet} disabled={isResolvingMagnet}>
+                    <button
+                      className="secondary-button"
+                      type="button"
+                      onClick={handleResolveMagnet}
+                      disabled={isResolvingMagnet || shouldBlockSafariMagnetFlow}
+                    >
                       {isResolvingMagnet ? "Resolving..." : "Resolve magnet"}
                     </button>
                     <span className="helper-text">{renderTorrentStatus()}</span>
                   </div>
+                  {shouldBlockSafariMagnetFlow ? (
+                    <div className="browser-warning" role="note">
+                      <strong>Chrome recommended.</strong> Safari has limited support for magnet links. For a full experience,
+                      we recommend using Chrome.
+                    </div>
+                  ) : null}
                   {torrentSession && torrentSession.files.length > 1 ? (
                     <>
                       <label className="input-label" htmlFor="torrent-file">

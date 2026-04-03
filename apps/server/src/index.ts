@@ -341,10 +341,15 @@ export function createSyncPlayServer(port = Number(process.env.PORT ?? 8787)) {
       case "peer_offer":
       case "peer_answer":
       case "peer_ice_candidate": {
+        const room = roomManager.getRoom(event.payload.roomId);
+
+        if (!room || room.participants.length <= 1) {
+          return;
+        }
+
         const targetSocket = findRoomSocket(event.payload.roomId, event.payload.targetParticipantId);
 
         if (!targetSocket) {
-          sendError(ws, "Target participant is not available.");
           return;
         }
 
