@@ -543,6 +543,5 @@ function safeParseMessage(message: string | Buffer): ClientEvent | null {
 }
 
 if (import.meta.main) {
-  const server = createSyncPlayServer();
-  console.log(`SyncPlay server running on http://127.0.0.1:${server.port}`);
+  createSyncPlayServer();
 }

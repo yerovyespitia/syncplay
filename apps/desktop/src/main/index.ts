@@ -997,7 +997,6 @@ function startMediaServer() {
   mediaServerBaseUrlPromise = new Promise<string>((resolve, reject) => {
     const server = createServer((request, response) => {
       void handleMediaServerRequest(request, response).catch((error: unknown) => {
-        console.error("[syncplay:media-server] request failed", error);
         if (!response.headersSent) {
           writeErrorResponse(response, 500, "Internal media server error.");
           return;

@@ -3428,7 +3428,9 @@ export function LocalFileRoomPlayer({
 }
 
 function debugLog(role: "host" | "guest", message: string, details?: Record<string, unknown>) {
-  console.info(`[syncplay:local:${role}] ${message}`, details ?? {});
+  void role;
+  void message;
+  void details;
 }
 
 function formatError(error: unknown) {
