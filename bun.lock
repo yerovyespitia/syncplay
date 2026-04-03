@@ -40,6 +40,7 @@
       "version": "0.0.1",
       "dependencies": {
         "@syncplay/shared": "workspace:*",
+        "webtorrent": "^2.8.5",
       },
     },
     "packages/shared": {

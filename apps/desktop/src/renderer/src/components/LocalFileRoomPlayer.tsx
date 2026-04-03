@@ -10,6 +10,10 @@ import type {
   SubtitleTrack,
   TransferState
 } from "@syncplay/shared";
+import {
+  isWebTorrentSelectedFile,
+  type SelectedTorrentFileSource
+} from "../lib/torrentSessionProvider";
 
 type RemotePlaybackCommand =
   | {
@@ -52,7 +56,7 @@ type PeerSignal =
 interface LocalFileRoomPlayerProps {
   room: RoomState & { mediaSource: HostedFileMediaSource };
   selfId: string | null;
-  localFile: PickedLocalFile | File | null;
+  localFile: SelectedTorrentFileSource | File | null;
   isTheaterMode: boolean;
   showDebugInfo?: boolean;
   showLoadingOverlay?: boolean;
@@ -344,6 +348,10 @@ function readChunkBytesFromEntries(chunkEntries: Array<[number, Uint8Array]>, st
   }
 
   return written === length ? result : null;
+}
+
+function isDesktopPickedLocalFile(value: SelectedTorrentFileSource | File): value is PickedLocalFile {
+  return "fileId" in value;
 }
 
 function PlayIcon() {
@@ -1632,9 +1640,9 @@ export function LocalFileRoomPlayer({
     }
 
     preparingHostMediaRef.current = true;
-    const hostFileName = "fileId" in localFile ? localFile.fileName : localFile.name;
-    const hostFileSize = "fileId" in localFile ? localFile.fileSize : localFile.size;
-    const hostMimeType = "fileId" in localFile ? localFile.mimeType : localFile.type;
+    const hostFileName = localFile instanceof File ? localFile.name : localFile.fileName;
+    const hostFileSize = localFile instanceof File ? localFile.size : localFile.fileSize;
+    const hostMimeType = localFile instanceof File ? localFile.type : localFile.mimeType;
     debugLog(debugRole, "prepareHostMedia start", {
       fileName: hostFileName,
       fileSize: hostFileSize,
@@ -1642,7 +1650,12 @@ export function LocalFileRoomPlayer({
     });
 
     try {
-      const url = "fileId" in localFile ? localFile.streamUrl || localFile.fileUrl : createObjectUrlFromFile(localFile);
+      const url =
+        localFile instanceof File
+          ? createObjectUrlFromFile(localFile)
+          : isWebTorrentSelectedFile(localFile)
+            ? localFile.playbackUrl
+            : localFile.streamUrl || localFile.fileUrl;
       setMediaUrl(url);
       updateLocalMessage("File ready on host");
       debugLog(debugRole, "prepareHostMedia success", { url });
@@ -2002,12 +2015,16 @@ export function LocalFileRoomPlayer({
     }
   }
 
-  async function readLocalChunk(file: PickedLocalFile | File, offset: number, length: number) {
-    if ("fileId" in file) {
+  async function readLocalChunk(file: SelectedTorrentFileSource | File, offset: number, length: number) {
+    if (file instanceof File) {
+      return new Uint8Array(await file.slice(offset, offset + length).arrayBuffer());
+    }
+
+    if (isDesktopPickedLocalFile(file)) {
       return desktopApi.readLocalFileChunk(file.fileId, offset, length);
     }
 
-    return new Uint8Array(await file.slice(offset, offset + length).arrayBuffer());
+    return file.readChunk(offset, length);
   }
 
   async function handleBinaryChunk(payload: Blob | ArrayBuffer) {

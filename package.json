@@ -6,8 +6,9 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "concurrently -k \"bun run --filter @syncplay/server dev\" \"bun run --filter @syncplay/desktop dev\"",
+    "dev": "concurrently -k \"bun run --filter @syncplay/server dev\" \"bun run dev:torrent-proxy\" \"bun run --filter @syncplay/desktop dev\"",
     "dev:server": "bun run --filter @syncplay/server dev",
+    "dev:torrent-proxy": "node scripts/torrent-proxy.mjs",
     "dev:desktop": "bun run --filter @syncplay/desktop dev",
     "dev:desktop:second": "cd apps/desktop && ELECTRON_RENDERER_URL=http://localhost:5173 bunx electron .",
     "build": "bun run --filter '*' build",

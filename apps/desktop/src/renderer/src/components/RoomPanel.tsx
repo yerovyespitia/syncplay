@@ -3,7 +3,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   ChatMessage,
   HostedFileMediaSource,
-  PickedLocalFile,
   RoomState,
   SubtitleTrack,
   TransferState,
@@ -11,6 +10,7 @@ import type {
 } from "@syncplay/shared";
 
 import type { DebugEntry } from "../hooks/useRoomConnection";
+import type { SelectedTorrentFileSource } from "../lib/torrentSessionProvider";
 import { LocalFileRoomPlayer } from "./LocalFileRoomPlayer";
 import { YouTubeRoomPlayer } from "./YouTubeRoomPlayer";
 
@@ -54,7 +54,7 @@ type PeerSignal =
 
 interface RoomPanelProps {
   room: RoomState;
-  localFile: PickedLocalFile | File | null;
+  localFile: SelectedTorrentFileSource | File | null;
   selfId: string | null;
   remoteCommand: RemotePlaybackCommand | null;
   debugEntries: DebugEntry[];

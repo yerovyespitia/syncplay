@@ -10,6 +10,11 @@ import windowsIcon from "./assets/windows.svg";
 import { RoomPanel } from "./components/RoomPanel";
 import { SyncPlayLogo } from "./components/SyncPlayLogo";
 import { useRoomConnection } from "./hooks/useRoomConnection";
+import {
+  createTorrentSessionProvider,
+  type SelectedTorrentFileSource,
+  type WebTorrentSelectedFile
+} from "./lib/torrentSessionProvider";
 
 type SourceOption = "youtube" | "local_file" | "torrent_magnet";
 
@@ -169,14 +174,15 @@ export default function App() {
   const desktopApi = window.syncplayDesktop ?? fallbackDesktopApi;
   const isDev = import.meta.env.DEV;
   const hasDesktopBridge = Boolean(window.syncplayDesktop);
+  const torrentSessionProvider = useMemo(() => createTorrentSessionProvider(window.syncplayDesktop), []);
   const platformLabel = formatPlatformLabel(desktopApi.platform || detectPlatformLabel());
   const electronVersionLabel = desktopApi.electronVersion || detectElectronVersion();
   const [sourceOption, setSourceOption] = useState<SourceOption>("youtube");
   const [videoUrl, setVideoUrl] = useState("");
   const [magnetLink, setMagnetLink] = useState("");
   const [roomCode, setRoomCode] = useState("");
-  const [selectedLocalFile, setSelectedLocalFile] = useState<PickedLocalFile | null>(null);
-  const [selectedPlaybackFile, setSelectedPlaybackFile] = useState<PickedLocalFile | File | null>(null);
+  const [selectedLocalFile, setSelectedLocalFile] = useState<PickedLocalFile | WebTorrentSelectedFile | null>(null);
+  const [selectedPlaybackFile, setSelectedPlaybackFile] = useState<SelectedTorrentFileSource | File | null>(null);
   const [torrentSession, setTorrentSession] = useState<TorrentSessionSummary | null>(null);
   const [isResolvingMagnet, setIsResolvingMagnet] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
@@ -208,9 +214,7 @@ export default function App() {
     sendPause,
     sendSeek
   } = useRoomConnection();
-  const shouldShowDesktopBridgeWarning =
-    !hasDesktopBridge &&
-    (sourceOption === "torrent_magnet" || (room !== null && room.mediaSource.type === "torrent_magnet"));
+  const shouldShowMagnetSupportWarning = sourceOption === "torrent_magnet" && !torrentSessionProvider.isSupported;
 
   const parsedVideo = useMemo(() => parseYouTubeUrl(videoUrl), [videoUrl]);
   const canCreateRoom =
@@ -232,7 +236,7 @@ export default function App() {
     }
 
     try {
-      await desktopApi.disposeTorrentSession(activeSessionId);
+      await torrentSessionProvider.disposeTorrentSession(activeSessionId);
     } catch {
       // Best-effort cleanup for abandoned sessions.
     }
@@ -323,7 +327,7 @@ export default function App() {
     activeTorrentSessionIdRef.current = torrentSession.sessionId;
 
     const intervalId = window.setInterval(() => {
-      void desktopApi.getTorrentSessionStatus(torrentSession.sessionId).then((nextStatus) => {
+      void torrentSessionProvider.getTorrentSessionStatus(torrentSession.sessionId).then((nextStatus) => {
         if (nextStatus) {
           setTorrentSession(nextStatus);
         }
@@ -333,7 +337,7 @@ export default function App() {
     return () => {
       window.clearInterval(intervalId);
     };
-  }, [desktopApi, torrentSession]);
+  }, [torrentSession, torrentSessionProvider]);
 
   useEffect(() => {
     return () => {
@@ -394,7 +398,7 @@ export default function App() {
     setIsResolvingMagnet(true);
 
     try {
-      const nextSession = await desktopApi.resolveMagnetLink(magnetLink.trim());
+      const nextSession = await torrentSessionProvider.resolveMagnetLink(magnetLink.trim());
       setTorrentSession(nextSession);
       activeTorrentSessionIdRef.current = nextSession.sessionId || null;
 
@@ -404,10 +408,10 @@ export default function App() {
       }
 
       if (nextSession.files.length === 1) {
-        const autoSelectedFile = await desktopApi.selectTorrentFile(nextSession.sessionId, nextSession.files[0].index);
+        const autoSelectedFile = await torrentSessionProvider.selectTorrentFile(nextSession.sessionId, nextSession.files[0].index);
         setSelectedLocalFile(autoSelectedFile);
         setSelectedPlaybackFile(autoSelectedFile);
-        const latestStatus = await desktopApi.getTorrentSessionStatus(nextSession.sessionId);
+        const latestStatus = await torrentSessionProvider.getTorrentSessionStatus(nextSession.sessionId);
         if (latestStatus) {
           setTorrentSession(latestStatus);
         }
@@ -429,10 +433,10 @@ export default function App() {
     }
 
     try {
-      const pickedFile = await desktopApi.selectTorrentFile(torrentSession.sessionId, fileIndex);
+      const pickedFile = await torrentSessionProvider.selectTorrentFile(torrentSession.sessionId, fileIndex);
       setSelectedLocalFile(pickedFile);
       setSelectedPlaybackFile(pickedFile);
-      const latestStatus = await desktopApi.getTorrentSessionStatus(torrentSession.sessionId);
+      const latestStatus = await torrentSessionProvider.getTorrentSessionStatus(torrentSession.sessionId);
       if (latestStatus) {
         setTorrentSession(latestStatus);
       }
@@ -792,10 +796,9 @@ export default function App() {
         </section>
       ) : null}
 
-      {shouldShowDesktopBridgeWarning ? (
+      {shouldShowMagnetSupportWarning ? (
         <section className="error-banner">
-          <strong>Desktop bridge missing:</strong> magnet-link rooms require the Electron desktop app. Local-file rooms
-          can still work in the browser.
+          <strong>Magnet support unavailable:</strong> {torrentSessionProvider.unsupportedReason}
         </section>
       ) : null}
     </main>
