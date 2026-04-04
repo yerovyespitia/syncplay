@@ -18,6 +18,7 @@ const SYNCPLAY_MEDIA_SCHEME = "syncplay-media";
 const STREAM_CHUNK_SIZE = 1024 * 1024;
 const TORRENT_RESOLVE_TIMEOUT_MS = 90_000;
 const TORRENT_DOWNLOAD_ROOT = path.join(os.tmpdir(), "syncplay-torrents");
+const RENDERER_BUILD_DIR = path.join(__dirname, "../renderer");
 const DEFAULT_TORRENT_TRACKERS = [
   "wss://tracker.openwebtorrent.com",
   "wss://tracker.files.fm:7073/announce",
@@ -104,7 +105,7 @@ function resolveMacAppIconPath() {
   return path.resolve(__dirname, "../../resources/icon.png");
 }
 
-function createWindow() {
+async function createWindow() {
   const mainWindow = new BrowserWindow({
     width: 1280,
     height: 880,
@@ -135,9 +136,10 @@ function createWindow() {
   });
 
   if (rendererUrl) {
-    mainWindow.loadURL(rendererUrl);
+    await mainWindow.loadURL(rendererUrl);
   } else {
-    mainWindow.loadFile(path.join(__dirname, "../renderer/index.html"));
+    const mediaServerBaseUrl = await startMediaServer();
+    await mainWindow.loadURL(`${mediaServerBaseUrl}/`);
   }
 }
 
@@ -605,6 +607,91 @@ function writeErrorResponse(response: ServerResponse, status: number, message: s
   response.end(message);
 }
 
+function getRendererAssetPath(requestPathname: string) {
+  const normalizedPathname = decodeURIComponent(requestPathname === "/" ? "/index.html" : requestPathname);
+  const relativePath = normalizedPathname.replace(/^\/+/, "");
+  const assetPath = path.normalize(path.join(RENDERER_BUILD_DIR, relativePath));
+
+  if (!assetPath.startsWith(`${RENDERER_BUILD_DIR}${path.sep}`) && assetPath !== path.join(RENDERER_BUILD_DIR, "index.html")) {
+    return null;
+  }
+
+  return assetPath;
+}
+
+function inferRendererMimeType(filePath: string) {
+  switch (path.extname(filePath).toLowerCase()) {
+    case ".css":
+      return "text/css; charset=utf-8";
+    case ".html":
+      return "text/html; charset=utf-8";
+    case ".js":
+    case ".mjs":
+      return "text/javascript; charset=utf-8";
+    case ".json":
+      return "application/json; charset=utf-8";
+    case ".png":
+      return "image/png";
+    case ".svg":
+      return "image/svg+xml";
+    case ".woff":
+      return "font/woff";
+    case ".woff2":
+      return "font/woff2";
+    default:
+      return "application/octet-stream";
+  }
+}
+
+async function handleRendererRequest(requestUrl: URL, method: string, response: ServerResponse) {
+  const normalizedMethod = method.toUpperCase();
+
+  if (normalizedMethod !== "GET" && normalizedMethod !== "HEAD") {
+    writeErrorResponse(response, 405, "Method not allowed.");
+    return true;
+  }
+
+  let assetPath = getRendererAssetPath(requestUrl.pathname);
+
+  if (!assetPath) {
+    writeErrorResponse(response, 403, "Forbidden.");
+    return true;
+  }
+
+  let stats: Awaited<ReturnType<typeof fs.stat>> | null = null;
+
+  try {
+    stats = await fs.stat(assetPath);
+  } catch {
+    if (path.extname(assetPath)) {
+      writeErrorResponse(response, 404, "Asset not found.");
+      return true;
+    }
+
+    assetPath = path.join(RENDERER_BUILD_DIR, "index.html");
+    stats = await fs.stat(assetPath);
+  }
+
+  if (!stats.isFile()) {
+    writeErrorResponse(response, 404, "Asset not found.");
+    return true;
+  }
+
+  response.writeHead(200, {
+    "Cache-Control": assetPath.endsWith(".html") ? "no-store" : "public, max-age=31536000, immutable",
+    "Content-Length": String(stats.size),
+    "Content-Type": inferRendererMimeType(assetPath)
+  });
+
+  if (normalizedMethod === "HEAD") {
+    response.end();
+    return true;
+  }
+
+  response.end(await fs.readFile(assetPath));
+  return true;
+}
+
 function writeMediaHeaders(
   response: ServerResponse,
   session: MediaCacheSession,
@@ -666,6 +753,15 @@ async function streamMediaBytes(
 
 async function handleMediaServerRequest(request: IncomingMessage, response: ServerResponse) {
   const requestUrl = request.url ? new URL(request.url, "http://127.0.0.1") : null;
+
+  if (requestUrl && !requestUrl.pathname.startsWith("/cache/") && !requestUrl.pathname.startsWith("/local/")) {
+    const handled = await handleRendererRequest(requestUrl, (request.method ?? "GET"), response);
+
+    if (handled) {
+      return;
+    }
+  }
+
   const cacheId = getMediaCacheIdFromPathname(requestUrl?.pathname);
 
   if (!cacheId) {
@@ -1042,7 +1138,7 @@ app.whenReady().then(() => {
       return;
     }
 
-    createWindow();
+    await createWindow();
   });
 
   ipcMain.handle("syncplay:pick-local-file", async () => {
@@ -1284,11 +1380,11 @@ app.whenReady().then(() => {
     optimizer.watchWindowShortcuts(window);
   });
 
-  createWindow();
+  void createWindow();
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow();
+      void createWindow();
     }
   });
 });

@@ -61,7 +61,8 @@ export function YouTubeRoomPlayer({ room, selfId, remoteCommand, onPlay, onPause
         controls: 1,
         disablekb: 0,
         rel: 0,
-        modestbranding: 1
+        modestbranding: 1,
+        origin: window.location.origin
       }
     }),
     []
