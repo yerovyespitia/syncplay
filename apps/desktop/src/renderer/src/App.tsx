@@ -307,6 +307,9 @@ export default function App() {
         setRoomCode(normalizedRoomCode);
         joinRoom(normalizedRoomCode);
       },
+      leaveCurrentRoom: async () => {
+        await handleLeaveRoom();
+      },
       createCurrentRoom: () => {
         handleCreateRoom();
       }

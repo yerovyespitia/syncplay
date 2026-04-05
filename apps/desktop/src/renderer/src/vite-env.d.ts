@@ -10,6 +10,7 @@ declare global {
       selectSourceOption: (sourceOption: "youtube" | "local_file" | "torrent_magnet") => void;
       selectLocalFileByPath: (filePath: string) => Promise<unknown>;
       joinRoomByCode: (roomCode: string) => void;
+      leaveCurrentRoom: () => Promise<void>;
       createCurrentRoom: () => void;
     };
     __syncplayLocalPlayerDebug?: {

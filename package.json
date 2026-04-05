@@ -11,6 +11,8 @@
     "dev:torrent-proxy": "node scripts/torrent-proxy.mjs",
     "dev:desktop": "bun run --filter @syncplay/desktop dev",
     "dev:desktop:second": "cd apps/desktop && ELECTRON_RENDERER_URL=http://localhost:5173 bunx electron .",
+    "perf:local-file": "node scripts/perf-local-file.mjs",
+    "perf:magnet": "node scripts/perf-magnet.mjs",
     "build": "bun run --filter '*' build",
     "dist": "bun run --filter @syncplay/desktop dist",
     "dist:mac": "bun run --filter @syncplay/desktop dist:mac",

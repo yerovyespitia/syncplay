@@ -1,0 +1,503 @@
+{
+  "kind": "local_file_guest_performance",
+  "generatedAt": "2026-04-05T12:31:20.492Z",
+  "filePath": "/Users/yerovy/Downloads/The.Net.1995.1080p.BluRay.x264.YIFY.mp4",
+  "iterationCount": 3,
+  "summary": {
+    "totalRuns": 3,
+    "successfulRuns": 3,
+    "failedRuns": 0,
+    "metrics": {
+      "host_ready": {
+        "count": 3,
+        "minMs": 260,
+        "maxMs": 270,
+        "avgMs": 265.67,
+        "medianMs": 267
+      },
+      "room_created": {
+        "count": 3,
+        "minMs": 783,
+        "maxMs": 798,
+        "avgMs": 790.67,
+        "medianMs": 791
+      },
+      "guest_window_ready": {
+        "count": 3,
+        "minMs": 783,
+        "maxMs": 798,
+        "avgMs": 790.67,
+        "medianMs": 791
+      },
+      "guest_joined_room": {
+        "count": 3,
+        "minMs": 1039,
+        "maxMs": 1057,
+        "avgMs": 1049,
+        "medianMs": 1051
+      },
+      "guest_buffering_started": {
+        "count": 3,
+        "minMs": 1040,
+        "maxMs": 1058,
+        "avgMs": 1049.67,
+        "medianMs": 1051
+      },
+      "guest_media_url_ready": {
+        "count": 3,
+        "minMs": 45474,
+        "maxMs": 48265,
+        "avgMs": 46500.67,
+        "medianMs": 45763
+      },
+      "guest_ready": {
+        "count": 3,
+        "minMs": 45727,
+        "maxMs": 48265,
+        "avgMs": 46585,
+        "medianMs": 45763
+      },
+      "guest_canplay": {
+        "count": 3,
+        "minMs": 45727,
+        "maxMs": 48265,
+        "avgMs": 46585.33,
+        "medianMs": 45764
+      },
+      "guest_first_playback": {
+        "count": 3,
+        "minMs": 47252,
+        "maxMs": 50032,
+        "avgMs": 48272.33,
+        "medianMs": 47533
+      }
+    }
+  },
+  "focusMetrics": {
+    "guest_join_to_ready": {
+      "count": 3,
+      "minMs": 44670,
+      "maxMs": 47226,
+      "avgMs": 45536,
+      "medianMs": 44712
+    },
+    "guest_join_to_canplay": {
+      "count": 3,
+      "minMs": 44670,
+      "maxMs": 47226,
+      "avgMs": 45536.33,
+      "medianMs": 44713
+    },
+    "guest_join_to_first_playback": {
+      "count": 3,
+      "minMs": 46195,
+      "maxMs": 48993,
+      "avgMs": 47223.33,
+      "medianMs": 46482
+    }
+  },
+  "runs": [
+    {
+      "iteration": 1,
+      "metrics": {
+        "host_ready": {
+          "atMs": 260
+        },
+        "room_created": {
+          "atMs": 783,
+          "details": {
+            "roomId": "AEZF9M",
+            "selectedLocalFile": {
+              "type": "local_file",
+              "mediaId": "80866ecf-3927-4518-9492-8de7e998ec84",
+              "fileId": "67bc5c97-a001-4f39-8aa1-b646c58f2074",
+              "fileUrl": "file:///Users/yerovy/Downloads/The.Net.1995.1080p.BluRay.x264.YIFY.mp4",
+              "streamUrl": "http://127.0.0.1:60853/local/67bc5c97-a001-4f39-8aa1-b646c58f2074/The.Net.1995.1080p.BluRay.x264.YIFY.mp4",
+              "fileName": "The.Net.1995.1080p.BluRay.x264.YIFY.mp4",
+              "fileSize": 1975810913,
+              "mimeType": "video/mp4"
+            }
+          }
+        },
+        "guest_window_ready": {
+          "atMs": 783
+        },
+        "guest_joined_room": {
+          "atMs": 1039
+        },
+        "guest_buffering_started": {
+          "atMs": 1040,
+          "details": {
+            "phase": "buffering",
+            "progress": 0.0007297216502417406,
+            "bytesReceived": 1441792,
+            "bytesPersisted": 1441792,
+            "bytesTotal": 1975810913,
+            "bufferedUntilTime": 5.005113671394761,
+            "isPlaybackReady": false,
+            "lastRequestedRange": {
+              "startByte": 0,
+              "endByte": 2097152,
+              "reason": "initial"
+            },
+            "availableRangeCount": 1,
+            "message": "Preparing playback"
+          }
+        },
+        "guest_media_url_ready": {
+          "atMs": 48265,
+          "details": {
+            "mediaUrl": "http://127.0.0.1:60853/local/e88449a8-4c30-4aab-ac1f-513e8f4d7bc2/The.Net.1995.1080p.BluRay.x264.YIFY.mp4",
+            "activeMediaUrlIndex": 0
+          }
+        },
+        "guest_ready": {
+          "atMs": 48265,
+          "details": {
+            "phase": "ready",
+            "progress": 1,
+            "bytesReceived": 1975810913,
+            "bytesPersisted": 1975810913,
+            "bytesTotal": 1975810913,
+            "bufferedUntilTime": 6858.935417,
+            "isPlaybackReady": true,
+            "availableRangeCount": 1,
+            "message": "Ready to play"
+          }
+        },
+        "guest_canplay": {
+          "atMs": 48265,
+          "details": {
+            "paused": false,
+            "ended": false,
+            "currentSrc": "http://127.0.0.1:60853/local/e88449a8-4c30-4aab-ac1f-513e8f4d7bc2/The.Net.1995.1080p.BluRay.x264.YIFY.mp4",
+            "readyState": 4,
+            "networkState": 1,
+            "currentTime": 0,
+            "duration": 6858.935417,
+            "videoWidth": 1920,
+            "videoHeight": 1040,
+            "error": null
+          }
+        },
+        "guest_first_playback": {
+          "atMs": 50032,
+          "details": {
+            "paused": false,
+            "ended": false,
+            "currentSrc": "http://127.0.0.1:60853/local/e88449a8-4c30-4aab-ac1f-513e8f4d7bc2/The.Net.1995.1080p.BluRay.x264.YIFY.mp4",
+            "readyState": 4,
+            "networkState": 1,
+            "currentTime": 1.724349,
+            "duration": 6858.935417,
+            "videoWidth": 1920,
+            "videoHeight": 1040,
+            "error": null
+          }
+        }
+      },
+      "guestTransferState": {
+        "phase": "ready",
+        "progress": 1,
+        "bytesReceived": 1975810913,
+        "bytesPersisted": 1975810913,
+        "bytesTotal": 1975810913,
+        "bufferedUntilTime": 6858.935417,
+        "isPlaybackReady": true,
+        "availableRangeCount": 1,
+        "message": "Ready to play"
+      },
+      "guestVideo": {
+        "paused": false,
+        "ended": false,
+        "currentSrc": "http://127.0.0.1:60853/local/e88449a8-4c30-4aab-ac1f-513e8f4d7bc2/The.Net.1995.1080p.BluRay.x264.YIFY.mp4",
+        "readyState": 4,
+        "networkState": 1,
+        "currentTime": 1.724349,
+        "duration": 6858.935417,
+        "videoWidth": 1920,
+        "videoHeight": 1040,
+        "error": null
+      },
+      "hostRoomTransferState": {
+        "phase": "ready",
+        "progress": 1,
+        "bytesReceived": 1975810913,
+        "bytesPersisted": 1975810913,
+        "bytesTotal": 1975810913,
+        "bufferedUntilTime": 6858.935417,
+        "isPlaybackReady": true,
+        "availableRangeCount": 1,
+        "message": "Ready to play"
+      }
+    },
+    {
+      "iteration": 2,
+      "metrics": {
+        "host_ready": {
+          "atMs": 267
+        },
+        "room_created": {
+          "atMs": 791,
+          "details": {
+            "roomId": "MDKC6F",
+            "selectedLocalFile": {
+              "type": "local_file",
+              "mediaId": "5e1bc06b-cc1c-4d8a-b5cc-70c018b09cc8",
+              "fileId": "9e59d5d3-3288-4283-a399-4caddc908e56",
+              "fileUrl": "file:///Users/yerovy/Downloads/The.Net.1995.1080p.BluRay.x264.YIFY.mp4",
+              "streamUrl": "http://127.0.0.1:60853/local/9e59d5d3-3288-4283-a399-4caddc908e56/The.Net.1995.1080p.BluRay.x264.YIFY.mp4",
+              "fileName": "The.Net.1995.1080p.BluRay.x264.YIFY.mp4",
+              "fileSize": 1975810913,
+              "mimeType": "video/mp4"
+            }
+          }
+        },
+        "guest_window_ready": {
+          "atMs": 791
+        },
+        "guest_joined_room": {
+          "atMs": 1051
+        },
+        "guest_buffering_started": {
+          "atMs": 1051,
+          "details": {
+            "phase": "buffering",
+            "progress": 0.0007297216502417406,
+            "bytesReceived": 1441792,
+            "bytesPersisted": 1441792,
+            "bytesTotal": 1975810913,
+            "bufferedUntilTime": 5.005113671394761,
+            "isPlaybackReady": false,
+            "lastRequestedRange": {
+              "startByte": 0,
+              "endByte": 2097152,
+              "reason": "initial"
+            },
+            "availableRangeCount": 1,
+            "message": "Preparing playback"
+          }
+        },
+        "guest_media_url_ready": {
+          "atMs": 45763,
+          "details": {
+            "mediaUrl": "http://127.0.0.1:60853/local/6f02eea2-0758-409b-89c2-268b911faaac/The.Net.1995.1080p.BluRay.x264.YIFY.mp4",
+            "activeMediaUrlIndex": 0
+          }
+        },
+        "guest_ready": {
+          "atMs": 45763,
+          "details": {
+            "phase": "ready",
+            "progress": 1,
+            "bytesReceived": 1975810913,
+            "bytesPersisted": 1975810913,
+            "bytesTotal": 1975810913,
+            "bufferedUntilTime": 6858.935417,
+            "isPlaybackReady": true,
+            "availableRangeCount": 1,
+            "message": "Ready to play"
+          }
+        },
+        "guest_canplay": {
+          "atMs": 45764,
+          "details": {
+            "paused": false,
+            "ended": false,
+            "currentSrc": "http://127.0.0.1:60853/local/6f02eea2-0758-409b-89c2-268b911faaac/The.Net.1995.1080p.BluRay.x264.YIFY.mp4",
+            "readyState": 4,
+            "networkState": 1,
+            "currentTime": 0,
+            "duration": 6858.935417,
+            "videoWidth": 1920,
+            "videoHeight": 1040,
+            "error": null
+          }
+        },
+        "guest_first_playback": {
+          "atMs": 47533,
+          "details": {
+            "paused": false,
+            "ended": false,
+            "currentSrc": "http://127.0.0.1:60853/local/6f02eea2-0758-409b-89c2-268b911faaac/The.Net.1995.1080p.BluRay.x264.YIFY.mp4",
+            "readyState": 4,
+            "networkState": 1,
+            "currentTime": 1.553784,
+            "duration": 6858.935417,
+            "videoWidth": 1920,
+            "videoHeight": 1040,
+            "error": null
+          }
+        }
+      },
+      "guestTransferState": {
+        "phase": "ready",
+        "progress": 1,
+        "bytesReceived": 1975810913,
+        "bytesPersisted": 1975810913,
+        "bytesTotal": 1975810913,
+        "bufferedUntilTime": 6858.935417,
+        "isPlaybackReady": true,
+        "availableRangeCount": 1,
+        "message": "Ready to play"
+      },
+      "guestVideo": {
+        "paused": false,
+        "ended": false,
+        "currentSrc": "http://127.0.0.1:60853/local/6f02eea2-0758-409b-89c2-268b911faaac/The.Net.1995.1080p.BluRay.x264.YIFY.mp4",
+        "readyState": 4,
+        "networkState": 1,
+        "currentTime": 1.553784,
+        "duration": 6858.935417,
+        "videoWidth": 1920,
+        "videoHeight": 1040,
+        "error": null
+      },
+      "hostRoomTransferState": {
+        "phase": "ready",
+        "progress": 1,
+        "bytesReceived": 1975810913,
+        "bytesPersisted": 1975810913,
+        "bytesTotal": 1975810913,
+        "bufferedUntilTime": 6858.935417,
+        "isPlaybackReady": true,
+        "availableRangeCount": 1,
+        "message": "Ready to play"
+      }
+    },
+    {
+      "iteration": 3,
+      "metrics": {
+        "host_ready": {
+          "atMs": 270
+        },
+        "room_created": {
+          "atMs": 798,
+          "details": {
+            "roomId": "ES9CCK",
+            "selectedLocalFile": {
+              "type": "local_file",
+              "mediaId": "6eda095e-68ad-4b5c-a751-f7ab203dfd8f",
+              "fileId": "790cdb28-5a68-440f-be9b-a207d7c5429a",
+              "fileUrl": "file:///Users/yerovy/Downloads/The.Net.1995.1080p.BluRay.x264.YIFY.mp4",
+              "streamUrl": "http://127.0.0.1:60853/local/790cdb28-5a68-440f-be9b-a207d7c5429a/The.Net.1995.1080p.BluRay.x264.YIFY.mp4",
+              "fileName": "The.Net.1995.1080p.BluRay.x264.YIFY.mp4",
+              "fileSize": 1975810913,
+              "mimeType": "video/mp4"
+            }
+          }
+        },
+        "guest_window_ready": {
+          "atMs": 798
+        },
+        "guest_joined_room": {
+          "atMs": 1057
+        },
+        "guest_buffering_started": {
+          "atMs": 1058,
+          "details": {
+            "phase": "buffering",
+            "progress": 0.0007297216502417406,
+            "bytesReceived": 1441792,
+            "bytesPersisted": 1441792,
+            "bytesTotal": 1975810913,
+            "bufferedUntilTime": 5.005113671394761,
+            "isPlaybackReady": false,
+            "lastRequestedRange": {
+              "startByte": 0,
+              "endByte": 2097152,
+              "reason": "initial"
+            },
+            "availableRangeCount": 1,
+            "message": "Preparing playback"
+          }
+        },
+        "guest_media_url_ready": {
+          "atMs": 45474,
+          "details": {
+            "mediaUrl": "http://127.0.0.1:60853/local/e04c4dc2-cde4-4170-9305-eae3579c5a85/The.Net.1995.1080p.BluRay.x264.YIFY.mp4",
+            "activeMediaUrlIndex": 0
+          }
+        },
+        "guest_ready": {
+          "atMs": 45727,
+          "details": {
+            "phase": "ready",
+            "progress": 1,
+            "bytesReceived": 1975810913,
+            "bytesPersisted": 1975810913,
+            "bytesTotal": 1975810913,
+            "bufferedUntilTime": 6858.935417,
+            "isPlaybackReady": true,
+            "availableRangeCount": 1,
+            "message": "Ready to play"
+          }
+        },
+        "guest_canplay": {
+          "atMs": 45727,
+          "details": {
+            "paused": false,
+            "ended": false,
+            "currentSrc": "http://127.0.0.1:60853/local/e04c4dc2-cde4-4170-9305-eae3579c5a85/The.Net.1995.1080p.BluRay.x264.YIFY.mp4",
+            "readyState": 4,
+            "networkState": 1,
+            "currentTime": 0.020451,
+            "duration": 6858.935417,
+            "videoWidth": 1920,
+            "videoHeight": 1040,
+            "error": null
+          }
+        },
+        "guest_first_playback": {
+          "atMs": 47252,
+          "details": {
+            "paused": false,
+            "ended": false,
+            "currentSrc": "http://127.0.0.1:60853/local/e04c4dc2-cde4-4170-9305-eae3579c5a85/The.Net.1995.1080p.BluRay.x264.YIFY.mp4",
+            "readyState": 4,
+            "networkState": 1,
+            "currentTime": 1.513651,
+            "duration": 6858.935417,
+            "videoWidth": 1920,
+            "videoHeight": 1040,
+            "error": null
+          }
+        }
+      },
+      "guestTransferState": {
+        "phase": "ready",
+        "progress": 1,
+        "bytesReceived": 1975810913,
+        "bytesPersisted": 1975810913,
+        "bytesTotal": 1975810913,
+        "bufferedUntilTime": 6858.935417,
+        "isPlaybackReady": true,
+        "availableRangeCount": 1,
+        "message": "Ready to play"
+      },
+      "guestVideo": {
+        "paused": false,
+        "ended": false,
+        "currentSrc": "http://127.0.0.1:60853/local/e04c4dc2-cde4-4170-9305-eae3579c5a85/The.Net.1995.1080p.BluRay.x264.YIFY.mp4",
+        "readyState": 4,
+        "networkState": 1,
+        "currentTime": 1.513651,
+        "duration": 6858.935417,
+        "videoWidth": 1920,
+        "videoHeight": 1040,
+        "error": null
+      },
+      "hostRoomTransferState": {
+        "phase": "ready",
+        "progress": 1,
+        "bytesReceived": 1975810913,
+        "bytesPersisted": 1975810913,
+        "bytesTotal": 1975810913,
+        "bufferedUntilTime": 6858.935417,
+        "isPlaybackReady": true,
+        "availableRangeCount": 1,
+        "message": "Ready to play"
+      }
+    }
+  ]
+}
