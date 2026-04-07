@@ -1,0 +1,374 @@
+{
+  "kind": "magnet_guest_performance",
+  "generatedAt": "2026-04-05T13:07:58.147Z",
+  "magnetLink": "magnet:?xt=urn:btih:dd8255ecdc7ca55fb0bbf81323d87062db1f6d1c&dn=BigBuckBunny&tr=udp://tracker.openbittorrent.com:80",
+  "iterationCount": 1,
+  "summary": {
+    "totalRuns": 1,
+    "successfulRuns": 1,
+    "failedRuns": 0,
+    "metrics": {
+      "host_ready": {
+        "count": 1,
+        "minMs": 261,
+        "maxMs": 261,
+        "avgMs": 261,
+        "medianMs": 261
+      },
+      "magnet_resolve_started": {
+        "count": 1,
+        "minMs": 269,
+        "maxMs": 269,
+        "avgMs": 269,
+        "medianMs": 269
+      },
+      "magnet_metadata_resolved": {
+        "count": 1,
+        "minMs": 1793,
+        "maxMs": 1793,
+        "avgMs": 1793,
+        "medianMs": 1793
+      },
+      "magnet_file_select_started": {
+        "count": 1,
+        "minMs": 1794,
+        "maxMs": 1794,
+        "avgMs": 1794,
+        "medianMs": 1794
+      },
+      "magnet_file_selected": {
+        "count": 1,
+        "minMs": 1795,
+        "maxMs": 1795,
+        "avgMs": 1795,
+        "medianMs": 1795
+      },
+      "room_created": {
+        "count": 1,
+        "minMs": 2052,
+        "maxMs": 2052,
+        "avgMs": 2052,
+        "medianMs": 2052
+      },
+      "guest_window_ready": {
+        "count": 1,
+        "minMs": 2052,
+        "maxMs": 2052,
+        "avgMs": 2052,
+        "medianMs": 2052
+      },
+      "guest_joined_room": {
+        "count": 1,
+        "minMs": 2308,
+        "maxMs": 2308,
+        "avgMs": 2308,
+        "medianMs": 2308
+      },
+      "guest_buffering_started": {
+        "count": 1,
+        "minMs": 2308,
+        "maxMs": 2308,
+        "avgMs": 2308,
+        "medianMs": 2308
+      },
+      "guest_media_url_ready": {
+        "count": 1,
+        "minMs": 5855,
+        "maxMs": 5855,
+        "avgMs": 5855,
+        "medianMs": 5855
+      },
+      "guest_ready": {
+        "count": 1,
+        "minMs": 14473,
+        "maxMs": 14473,
+        "avgMs": 14473,
+        "medianMs": 14473
+      },
+      "guest_canplay": {
+        "count": 1,
+        "minMs": 14488,
+        "maxMs": 14488,
+        "avgMs": 14488,
+        "medianMs": 14488
+      },
+      "guest_first_playback": {
+        "count": 1,
+        "minMs": 16077,
+        "maxMs": 16077,
+        "avgMs": 16077,
+        "medianMs": 16077
+      }
+    }
+  },
+  "focusMetrics": {
+    "host_magnet_resolve_time": {
+      "count": 1,
+      "minMs": 1524,
+      "maxMs": 1524,
+      "avgMs": 1524,
+      "medianMs": 1524
+    },
+    "host_file_select_time": {
+      "count": 1,
+      "minMs": 1,
+      "maxMs": 1,
+      "avgMs": 1,
+      "medianMs": 1
+    },
+    "guest_join_to_ready": {
+      "count": 1,
+      "minMs": 12165,
+      "maxMs": 12165,
+      "avgMs": 12165,
+      "medianMs": 12165
+    },
+    "guest_join_to_canplay": {
+      "count": 1,
+      "minMs": 12180,
+      "maxMs": 12180,
+      "avgMs": 12180,
+      "medianMs": 12180
+    },
+    "guest_join_to_first_playback": {
+      "count": 1,
+      "minMs": 13769,
+      "maxMs": 13769,
+      "avgMs": 13769,
+      "medianMs": 13769
+    }
+  },
+  "runs": [
+    {
+      "iteration": 1,
+      "metrics": {
+        "host_ready": {
+          "atMs": 261
+        },
+        "magnet_resolve_started": {
+          "atMs": 269
+        },
+        "magnet_metadata_resolved": {
+          "atMs": 1793,
+          "details": {
+            "sessionId": "db139cd2-b93d-49ec-a6a2-bee98dce4919",
+            "fileCount": 1,
+            "peerCount": 10
+          }
+        },
+        "magnet_file_select_started": {
+          "atMs": 1794,
+          "details": {
+            "fileIndex": 1,
+            "fileName": "Big Buck Bunny.mp4",
+            "fileSize": 276134947
+          }
+        },
+        "magnet_file_selected": {
+          "atMs": 1795,
+          "details": {
+            "selectedLocalFile": {
+              "type": "torrent_magnet",
+              "magnetUri": "magnet:?xt=urn:btih:dd8255ecdc7ca55fb0bbf81323d87062db1f6d1c&dn=BigBuckBunny&tr=udp://tracker.openbittorrent.com:80",
+              "infoHash": "dd8255ecdc7ca55fb0bbf81323d87062db1f6d1c",
+              "mediaId": "6a7ec223-66d2-434d-b467-db95b3e9e8a7",
+              "fileId": "e43af597-a1e1-45cd-a2a6-02422f1697cd",
+              "fileUrl": "http://127.0.0.1:61593/local/e43af597-a1e1-45cd-a2a6-02422f1697cd/Big%20Buck%20Bunny.mp4",
+              "streamUrl": "http://127.0.0.1:61593/local/e43af597-a1e1-45cd-a2a6-02422f1697cd/Big%20Buck%20Bunny.mp4",
+              "fileName": "Big Buck Bunny.mp4",
+              "fileSize": 276134947,
+              "mimeType": "video/mp4"
+            },
+            "torrentSession": {
+              "sessionId": "db139cd2-b93d-49ec-a6a2-bee98dce4919",
+              "magnetUri": "magnet:?xt=urn:btih:dd8255ecdc7ca55fb0bbf81323d87062db1f6d1c&dn=BigBuckBunny&tr=udp://tracker.openbittorrent.com:80",
+              "infoHash": "dd8255ecdc7ca55fb0bbf81323d87062db1f6d1c",
+              "displayName": "Big Buck Bunny",
+              "phase": "downloading",
+              "files": [
+                {
+                  "index": 1,
+                  "name": "Big Buck Bunny.mp4",
+                  "path": "Big Buck Bunny/Big Buck Bunny.mp4",
+                  "size": 276134947,
+                  "mimeType": "video/mp4"
+                }
+              ],
+              "selectedFileIndex": 1,
+              "progress": 0,
+              "downloadedBytes": 0,
+              "totalBytes": 276134947,
+              "downloadSpeed": 42543.57142857143,
+              "uploadSpeed": 1743.5714285714287,
+              "peerCount": 10
+            }
+          }
+        },
+        "room_created": {
+          "atMs": 2052,
+          "details": {
+            "roomId": "LPMLND",
+            "selectedLocalFile": {
+              "type": "torrent_magnet",
+              "magnetUri": "magnet:?xt=urn:btih:dd8255ecdc7ca55fb0bbf81323d87062db1f6d1c&dn=BigBuckBunny&tr=udp://tracker.openbittorrent.com:80",
+              "infoHash": "dd8255ecdc7ca55fb0bbf81323d87062db1f6d1c",
+              "mediaId": "6a7ec223-66d2-434d-b467-db95b3e9e8a7",
+              "fileId": "e43af597-a1e1-45cd-a2a6-02422f1697cd",
+              "fileUrl": "http://127.0.0.1:61593/local/e43af597-a1e1-45cd-a2a6-02422f1697cd/Big%20Buck%20Bunny.mp4",
+              "streamUrl": "http://127.0.0.1:61593/local/e43af597-a1e1-45cd-a2a6-02422f1697cd/Big%20Buck%20Bunny.mp4",
+              "fileName": "Big Buck Bunny.mp4",
+              "fileSize": 276134947,
+              "mimeType": "video/mp4"
+            }
+          }
+        },
+        "guest_window_ready": {
+          "atMs": 2052
+        },
+        "guest_joined_room": {
+          "atMs": 2308
+        },
+        "guest_buffering_started": {
+          "atMs": 2308,
+          "details": {
+            "phase": "buffering",
+            "progress": 0,
+            "bytesReceived": 0,
+            "bytesPersisted": 0,
+            "bytesTotal": 276134947,
+            "isPlaybackReady": false,
+            "lastRequestedRange": {
+              "startByte": 0,
+              "endByte": 2097152
+            },
+            "availableRangeCount": 0,
+            "message": "Preparing playback"
+          }
+        },
+        "guest_media_url_ready": {
+          "atMs": 5855,
+          "details": {
+            "mediaUrl": "http://127.0.0.1:61593/cache/df07085b-8450-4d26-8c5a-bbb702124ebe/Big%20Buck%20Bunny.mp4",
+            "activeMediaUrlIndex": 0
+          }
+        },
+        "guest_ready": {
+          "atMs": 14473,
+          "details": {
+            "phase": "ready",
+            "progress": 0.27198388619749747,
+            "bytesReceived": 75104256,
+            "bytesPersisted": 75104256,
+            "bytesTotal": 276134947,
+            "bufferedUntilTime": 162.96182728077517,
+            "isPlaybackReady": true,
+            "lastRequestedRange": {
+              "startByte": 70909952,
+              "endByte": 73007104,
+              "reason": "sequential"
+            },
+            "availableRangeCount": 2,
+            "message": "Ready to play"
+          }
+        },
+        "guest_canplay": {
+          "atMs": 14488,
+          "details": {
+            "paused": false,
+            "ended": false,
+            "currentSrc": "http://127.0.0.1:61593/cache/df07085b-8450-4d26-8c5a-bbb702124ebe/Big%20Buck%20Bunny.mp4",
+            "readyState": 4,
+            "networkState": 1,
+            "currentTime": 0.104862,
+            "duration": 634.6,
+            "videoWidth": 1920,
+            "videoHeight": 1080,
+            "error": null
+          }
+        },
+        "guest_first_playback": {
+          "atMs": 16077,
+          "details": {
+            "paused": false,
+            "ended": false,
+            "currentSrc": "http://127.0.0.1:61593/cache/df07085b-8450-4d26-8c5a-bbb702124ebe/Big%20Buck%20Bunny.mp4",
+            "readyState": 4,
+            "networkState": 1,
+            "currentTime": 1.708277,
+            "duration": 634.6,
+            "videoWidth": 1920,
+            "videoHeight": 1080,
+            "error": null
+          }
+        }
+      },
+      "magnetSession": {
+        "sessionId": "db139cd2-b93d-49ec-a6a2-bee98dce4919",
+        "magnetUri": "magnet:?xt=urn:btih:dd8255ecdc7ca55fb0bbf81323d87062db1f6d1c&dn=BigBuckBunny&tr=udp://tracker.openbittorrent.com:80",
+        "infoHash": "dd8255ecdc7ca55fb0bbf81323d87062db1f6d1c",
+        "displayName": "Big Buck Bunny",
+        "phase": "downloading",
+        "files": [
+          {
+            "index": 1,
+            "name": "Big Buck Bunny.mp4",
+            "path": "Big Buck Bunny/Big Buck Bunny.mp4",
+            "size": 276134947,
+            "mimeType": "video/mp4"
+          }
+        ],
+        "selectedFileIndex": 1,
+        "progress": 0.9597755984142058,
+        "downloadedBytes": 265027584,
+        "totalBytes": 276134947,
+        "downloadSpeed": 22001021.6,
+        "uploadSpeed": 47196.2,
+        "peerCount": 31
+      },
+      "guestTransferState": {
+        "phase": "buffering",
+        "progress": 0.27245855266555596,
+        "bytesReceived": 75235328,
+        "bytesPersisted": 75235328,
+        "bytesTotal": 276134947,
+        "bufferedUntilTime": 2.472,
+        "isPlaybackReady": true,
+        "lastRequestedRange": {
+          "startByte": 70909952,
+          "endByte": 73007104,
+          "reason": "sequential"
+        },
+        "availableRangeCount": 2,
+        "message": "Preparing playback"
+      },
+      "guestVideo": {
+        "paused": false,
+        "ended": false,
+        "currentSrc": "http://127.0.0.1:61593/cache/df07085b-8450-4d26-8c5a-bbb702124ebe/Big%20Buck%20Bunny.mp4",
+        "readyState": 4,
+        "networkState": 1,
+        "currentTime": 1.708277,
+        "duration": 634.6,
+        "videoWidth": 1920,
+        "videoHeight": 1080,
+        "error": null
+      },
+      "hostRoomTransferState": {
+        "phase": "buffering",
+        "progress": 0.27245855266555596,
+        "bytesReceived": 75235328,
+        "bytesPersisted": 75235328,
+        "bytesTotal": 276134947,
+        "bufferedUntilTime": 2.472,
+        "isPlaybackReady": true,
+        "lastRequestedRange": {
+          "startByte": 70909952,
+          "endByte": 73007104,
+          "reason": "sequential"
+        },
+        "availableRangeCount": 2,
+        "message": "Preparing playback"
+      }
+    }
+  ]
+}

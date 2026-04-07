@@ -1,0 +1,503 @@
+{
+  "kind": "local_file_guest_performance",
+  "generatedAt": "2026-04-05T13:11:14.947Z",
+  "filePath": "/Users/yerovy/Downloads/ Ye - BIANCA [가사해석].mp4",
+  "iterationCount": 3,
+  "summary": {
+    "totalRuns": 3,
+    "successfulRuns": 3,
+    "failedRuns": 0,
+    "metrics": {
+      "host_ready": {
+        "count": 3,
+        "minMs": 261,
+        "maxMs": 267,
+        "avgMs": 265,
+        "medianMs": 267
+      },
+      "room_created": {
+        "count": 3,
+        "minMs": 778,
+        "maxMs": 793,
+        "avgMs": 787.33,
+        "medianMs": 791
+      },
+      "guest_window_ready": {
+        "count": 3,
+        "minMs": 778,
+        "maxMs": 793,
+        "avgMs": 787.33,
+        "medianMs": 791
+      },
+      "guest_joined_room": {
+        "count": 3,
+        "minMs": 1039,
+        "maxMs": 1053,
+        "avgMs": 1048.33,
+        "medianMs": 1053
+      },
+      "guest_buffering_started": {
+        "count": 3,
+        "minMs": 1052,
+        "maxMs": 1060,
+        "avgMs": 1057.33,
+        "medianMs": 1060
+      },
+      "guest_media_url_ready": {
+        "count": 3,
+        "minMs": 3095,
+        "maxMs": 5888,
+        "avgMs": 4191.67,
+        "medianMs": 3592
+      },
+      "guest_ready": {
+        "count": 3,
+        "minMs": 3095,
+        "maxMs": 5889,
+        "avgMs": 4192.33,
+        "medianMs": 3593
+      },
+      "guest_canplay": {
+        "count": 3,
+        "minMs": 3096,
+        "maxMs": 5890,
+        "avgMs": 4193,
+        "medianMs": 3593
+      },
+      "guest_first_playback": {
+        "count": 3,
+        "minMs": 4868,
+        "maxMs": 7407,
+        "avgMs": 5797,
+        "medianMs": 5116
+      }
+    }
+  },
+  "focusMetrics": {
+    "guest_join_to_ready": {
+      "count": 3,
+      "minMs": 2042,
+      "maxMs": 4850,
+      "avgMs": 3144,
+      "medianMs": 2540
+    },
+    "guest_join_to_canplay": {
+      "count": 3,
+      "minMs": 2043,
+      "maxMs": 4851,
+      "avgMs": 3144.67,
+      "medianMs": 2540
+    },
+    "guest_join_to_first_playback": {
+      "count": 3,
+      "minMs": 3815,
+      "maxMs": 6368,
+      "avgMs": 4748.67,
+      "medianMs": 4063
+    }
+  },
+  "runs": [
+    {
+      "iteration": 1,
+      "metrics": {
+        "host_ready": {
+          "atMs": 261
+        },
+        "room_created": {
+          "atMs": 778,
+          "details": {
+            "roomId": "JLJ3A6",
+            "selectedLocalFile": {
+              "type": "local_file",
+              "mediaId": "bd3d10a2-090e-4365-8189-8908caef5062",
+              "fileId": "4db99a05-522f-4236-a690-18e68be46308",
+              "fileUrl": "file:///Users/yerovy/Downloads/%20Ye%20-%20BIANCA%20%5B%E1%84%80%E1%85%A1%E1%84%89%E1%85%A1%E1%84%92%E1%85%A2%E1%84%89%E1%85%A5%E1%86%A8%5D.mp4",
+              "streamUrl": "http://127.0.0.1:61593/local/4db99a05-522f-4236-a690-18e68be46308/%20Ye%20-%20BIANCA%20%5B%E1%84%80%E1%85%A1%E1%84%89%E1%85%A1%E1%84%92%E1%85%A2%E1%84%89%E1%85%A5%E1%86%A8%5D.mp4",
+              "fileName": " Ye - BIANCA [가사해석].mp4",
+              "fileSize": 11219373,
+              "mimeType": "video/mp4"
+            }
+          }
+        },
+        "guest_window_ready": {
+          "atMs": 778
+        },
+        "guest_joined_room": {
+          "atMs": 1039
+        },
+        "guest_buffering_started": {
+          "atMs": 1052,
+          "details": {
+            "phase": "buffering",
+            "progress": 0.08177854502207922,
+            "bytesReceived": 917504,
+            "bytesPersisted": 917504,
+            "bytesTotal": 11219373,
+            "bufferedUntilTime": 7.103423771258519,
+            "isPlaybackReady": false,
+            "lastRequestedRange": {
+              "startByte": 7025069,
+              "endByte": 11219373,
+              "reason": "resume"
+            },
+            "availableRangeCount": 2,
+            "message": "Preparing playback"
+          }
+        },
+        "guest_media_url_ready": {
+          "atMs": 5888,
+          "details": {
+            "mediaUrl": "http://127.0.0.1:61593/local/8675d86f-2c86-4557-985f-e7b383cab622/%20Ye%20-%20BIANCA%20%5B%E1%84%80%E1%85%A1%E1%84%89%E1%85%A1%E1%84%92%E1%85%A2%E1%84%89%E1%85%A5%E1%86%A8%5D.mp4",
+            "activeMediaUrlIndex": 1
+          }
+        },
+        "guest_ready": {
+          "atMs": 5889,
+          "details": {
+            "phase": "ready",
+            "progress": 1,
+            "bytesReceived": 11219373,
+            "bytesPersisted": 11219373,
+            "bytesTotal": 11219373,
+            "bufferedUntilTime": 147.891,
+            "isPlaybackReady": true,
+            "availableRangeCount": 1,
+            "message": "Ready to play"
+          }
+        },
+        "guest_canplay": {
+          "atMs": 5890,
+          "details": {
+            "paused": false,
+            "ended": false,
+            "currentSrc": "http://127.0.0.1:61593/local/8675d86f-2c86-4557-985f-e7b383cab622/%20Ye%20-%20BIANCA%20%5B%E1%84%80%E1%85%A1%E1%84%89%E1%85%A1%E1%84%92%E1%85%A2%E1%84%89%E1%85%A5%E1%86%A8%5D.mp4",
+            "readyState": 4,
+            "networkState": 1,
+            "currentTime": 0.08238,
+            "duration": 152.007982,
+            "videoWidth": 1280,
+            "videoHeight": 720,
+            "error": null
+          }
+        },
+        "guest_first_playback": {
+          "atMs": 7407,
+          "details": {
+            "paused": false,
+            "ended": false,
+            "currentSrc": "http://127.0.0.1:61593/local/8675d86f-2c86-4557-985f-e7b383cab622/%20Ye%20-%20BIANCA%20%5B%E1%84%80%E1%85%A1%E1%84%89%E1%85%A1%E1%84%92%E1%85%A2%E1%84%89%E1%85%A5%E1%86%A8%5D.mp4",
+            "readyState": 4,
+            "networkState": 1,
+            "currentTime": 1.615171,
+            "duration": 152.007982,
+            "videoWidth": 1280,
+            "videoHeight": 720,
+            "error": null
+          }
+        }
+      },
+      "guestTransferState": {
+        "phase": "ready",
+        "progress": 1,
+        "bytesReceived": 11219373,
+        "bytesPersisted": 11219373,
+        "bytesTotal": 11219373,
+        "bufferedUntilTime": 147.891,
+        "isPlaybackReady": true,
+        "availableRangeCount": 1,
+        "message": "Ready to play"
+      },
+      "guestVideo": {
+        "paused": false,
+        "ended": false,
+        "currentSrc": "http://127.0.0.1:61593/local/8675d86f-2c86-4557-985f-e7b383cab622/%20Ye%20-%20BIANCA%20%5B%E1%84%80%E1%85%A1%E1%84%89%E1%85%A1%E1%84%92%E1%85%A2%E1%84%89%E1%85%A5%E1%86%A8%5D.mp4",
+        "readyState": 4,
+        "networkState": 1,
+        "currentTime": 1.615171,
+        "duration": 152.007982,
+        "videoWidth": 1280,
+        "videoHeight": 720,
+        "error": null
+      },
+      "hostRoomTransferState": {
+        "phase": "ready",
+        "progress": 1,
+        "bytesReceived": 11219373,
+        "bytesPersisted": 11219373,
+        "bytesTotal": 11219373,
+        "bufferedUntilTime": 147.891,
+        "isPlaybackReady": true,
+        "availableRangeCount": 1,
+        "message": "Ready to play"
+      }
+    },
+    {
+      "iteration": 2,
+      "metrics": {
+        "host_ready": {
+          "atMs": 267
+        },
+        "room_created": {
+          "atMs": 791,
+          "details": {
+            "roomId": "S9YJBA",
+            "selectedLocalFile": {
+              "type": "local_file",
+              "mediaId": "aeeeaf2c-d018-4a10-b5f8-fa907b8911bd",
+              "fileId": "948dfbe0-f765-4829-a88d-dad81a98ea91",
+              "fileUrl": "file:///Users/yerovy/Downloads/%20Ye%20-%20BIANCA%20%5B%E1%84%80%E1%85%A1%E1%84%89%E1%85%A1%E1%84%92%E1%85%A2%E1%84%89%E1%85%A5%E1%86%A8%5D.mp4",
+              "streamUrl": "http://127.0.0.1:61593/local/948dfbe0-f765-4829-a88d-dad81a98ea91/%20Ye%20-%20BIANCA%20%5B%E1%84%80%E1%85%A1%E1%84%89%E1%85%A1%E1%84%92%E1%85%A2%E1%84%89%E1%85%A5%E1%86%A8%5D.mp4",
+              "fileName": " Ye - BIANCA [가사해석].mp4",
+              "fileSize": 11219373,
+              "mimeType": "video/mp4"
+            }
+          }
+        },
+        "guest_window_ready": {
+          "atMs": 791
+        },
+        "guest_joined_room": {
+          "atMs": 1053
+        },
+        "guest_buffering_started": {
+          "atMs": 1060,
+          "details": {
+            "phase": "buffering",
+            "progress": 0.14019179146642152,
+            "bytesReceived": 1572864,
+            "bytesPersisted": 1572864,
+            "bytesTotal": 11219373,
+            "bufferedUntilTime": 10.655135656887778,
+            "isPlaybackReady": false,
+            "lastRequestedRange": {
+              "startByte": 7025069,
+              "endByte": 11219373,
+              "reason": "resume"
+            },
+            "availableRangeCount": 2,
+            "message": "Preparing playback"
+          }
+        },
+        "guest_media_url_ready": {
+          "atMs": 3095,
+          "details": {
+            "mediaUrl": "http://127.0.0.1:61593/local/7217b38d-6e7f-4b78-93f9-b9b34163eeeb/%20Ye%20-%20BIANCA%20%5B%E1%84%80%E1%85%A1%E1%84%89%E1%85%A1%E1%84%92%E1%85%A2%E1%84%89%E1%85%A5%E1%86%A8%5D.mp4",
+            "activeMediaUrlIndex": 1
+          }
+        },
+        "guest_ready": {
+          "atMs": 3095,
+          "details": {
+            "phase": "ready",
+            "progress": 1,
+            "bytesReceived": 11219373,
+            "bytesPersisted": 11219373,
+            "bytesTotal": 11219373,
+            "bufferedUntilTime": 147.891,
+            "isPlaybackReady": true,
+            "availableRangeCount": 1,
+            "message": "Ready to play"
+          }
+        },
+        "guest_canplay": {
+          "atMs": 3096,
+          "details": {
+            "paused": false,
+            "ended": false,
+            "currentSrc": "http://127.0.0.1:61593/local/7217b38d-6e7f-4b78-93f9-b9b34163eeeb/%20Ye%20-%20BIANCA%20%5B%E1%84%80%E1%85%A1%E1%84%89%E1%85%A1%E1%84%92%E1%85%A2%E1%84%89%E1%85%A5%E1%86%A8%5D.mp4",
+            "readyState": 4,
+            "networkState": 1,
+            "currentTime": 0,
+            "duration": 152.007982,
+            "videoWidth": 1280,
+            "videoHeight": 720,
+            "error": null
+          }
+        },
+        "guest_first_playback": {
+          "atMs": 4868,
+          "details": {
+            "paused": false,
+            "ended": false,
+            "currentSrc": "http://127.0.0.1:61593/local/7217b38d-6e7f-4b78-93f9-b9b34163eeeb/%20Ye%20-%20BIANCA%20%5B%E1%84%80%E1%85%A1%E1%84%89%E1%85%A1%E1%84%92%E1%85%A2%E1%84%89%E1%85%A5%E1%86%A8%5D.mp4",
+            "readyState": 4,
+            "networkState": 1,
+            "currentTime": 1.727421,
+            "duration": 152.007982,
+            "videoWidth": 1280,
+            "videoHeight": 720,
+            "error": null
+          }
+        }
+      },
+      "guestTransferState": {
+        "phase": "ready",
+        "progress": 1,
+        "bytesReceived": 11219373,
+        "bytesPersisted": 11219373,
+        "bytesTotal": 11219373,
+        "bufferedUntilTime": 147.891,
+        "isPlaybackReady": true,
+        "availableRangeCount": 1,
+        "message": "Ready to play"
+      },
+      "guestVideo": {
+        "paused": false,
+        "ended": false,
+        "currentSrc": "http://127.0.0.1:61593/local/7217b38d-6e7f-4b78-93f9-b9b34163eeeb/%20Ye%20-%20BIANCA%20%5B%E1%84%80%E1%85%A1%E1%84%89%E1%85%A1%E1%84%92%E1%85%A2%E1%84%89%E1%85%A5%E1%86%A8%5D.mp4",
+        "readyState": 4,
+        "networkState": 1,
+        "currentTime": 1.727421,
+        "duration": 152.007982,
+        "videoWidth": 1280,
+        "videoHeight": 720,
+        "error": null
+      },
+      "hostRoomTransferState": {
+        "phase": "ready",
+        "progress": 1,
+        "bytesReceived": 11219373,
+        "bytesPersisted": 11219373,
+        "bytesTotal": 11219373,
+        "bufferedUntilTime": 147.891,
+        "isPlaybackReady": true,
+        "availableRangeCount": 1,
+        "message": "Ready to play"
+      }
+    },
+    {
+      "iteration": 3,
+      "metrics": {
+        "host_ready": {
+          "atMs": 267
+        },
+        "room_created": {
+          "atMs": 793,
+          "details": {
+            "roomId": "R97SA7",
+            "selectedLocalFile": {
+              "type": "local_file",
+              "mediaId": "d95b8870-03d8-4941-b349-bfaf19729482",
+              "fileId": "bc740d2c-cfc8-4d35-9629-697bebedbf21",
+              "fileUrl": "file:///Users/yerovy/Downloads/%20Ye%20-%20BIANCA%20%5B%E1%84%80%E1%85%A1%E1%84%89%E1%85%A1%E1%84%92%E1%85%A2%E1%84%89%E1%85%A5%E1%86%A8%5D.mp4",
+              "streamUrl": "http://127.0.0.1:61593/local/bc740d2c-cfc8-4d35-9629-697bebedbf21/%20Ye%20-%20BIANCA%20%5B%E1%84%80%E1%85%A1%E1%84%89%E1%85%A1%E1%84%92%E1%85%A2%E1%84%89%E1%85%A5%E1%86%A8%5D.mp4",
+              "fileName": " Ye - BIANCA [가사해석].mp4",
+              "fileSize": 11219373,
+              "mimeType": "video/mp4"
+            }
+          }
+        },
+        "guest_window_ready": {
+          "atMs": 793
+        },
+        "guest_joined_room": {
+          "atMs": 1053
+        },
+        "guest_buffering_started": {
+          "atMs": 1060,
+          "details": {
+            "phase": "buffering",
+            "progress": 0.10514384359981614,
+            "bytesReceived": 1179648,
+            "bytesPersisted": 1179648,
+            "bytesTotal": 11219373,
+            "bufferedUntilTime": 8.879279714073148,
+            "isPlaybackReady": false,
+            "lastRequestedRange": {
+              "startByte": 7025069,
+              "endByte": 11219373,
+              "reason": "resume"
+            },
+            "availableRangeCount": 2,
+            "message": "Preparing playback"
+          }
+        },
+        "guest_media_url_ready": {
+          "atMs": 3592,
+          "details": {
+            "mediaUrl": "http://127.0.0.1:61593/local/261984c9-6d29-40df-9e56-86478c0596c7/%20Ye%20-%20BIANCA%20%5B%E1%84%80%E1%85%A1%E1%84%89%E1%85%A1%E1%84%92%E1%85%A2%E1%84%89%E1%85%A5%E1%86%A8%5D.mp4",
+            "activeMediaUrlIndex": 1
+          }
+        },
+        "guest_ready": {
+          "atMs": 3593,
+          "details": {
+            "phase": "ready",
+            "progress": 1,
+            "bytesReceived": 11219373,
+            "bytesPersisted": 11219373,
+            "bytesTotal": 11219373,
+            "bufferedUntilTime": 149.222,
+            "isPlaybackReady": true,
+            "availableRangeCount": 1,
+            "message": "Ready to play"
+          }
+        },
+        "guest_canplay": {
+          "atMs": 3593,
+          "details": {
+            "paused": false,
+            "ended": false,
+            "currentSrc": "http://127.0.0.1:61593/local/261984c9-6d29-40df-9e56-86478c0596c7/%20Ye%20-%20BIANCA%20%5B%E1%84%80%E1%85%A1%E1%84%89%E1%85%A1%E1%84%92%E1%85%A2%E1%84%89%E1%85%A5%E1%86%A8%5D.mp4",
+            "readyState": 4,
+            "networkState": 1,
+            "currentTime": 0.035737,
+            "duration": 152.007982,
+            "videoWidth": 1280,
+            "videoHeight": 720,
+            "error": null
+          }
+        },
+        "guest_first_playback": {
+          "atMs": 5116,
+          "details": {
+            "paused": false,
+            "ended": false,
+            "currentSrc": "http://127.0.0.1:61593/local/261984c9-6d29-40df-9e56-86478c0596c7/%20Ye%20-%20BIANCA%20%5B%E1%84%80%E1%85%A1%E1%84%89%E1%85%A1%E1%84%92%E1%85%A2%E1%84%89%E1%85%A5%E1%86%A8%5D.mp4",
+            "readyState": 4,
+            "networkState": 1,
+            "currentTime": 1.573583,
+            "duration": 152.007982,
+            "videoWidth": 1280,
+            "videoHeight": 720,
+            "error": null
+          }
+        }
+      },
+      "guestTransferState": {
+        "phase": "ready",
+        "progress": 1,
+        "bytesReceived": 11219373,
+        "bytesPersisted": 11219373,
+        "bytesTotal": 11219373,
+        "bufferedUntilTime": 149.222,
+        "isPlaybackReady": true,
+        "availableRangeCount": 1,
+        "message": "Ready to play"
+      },
+      "guestVideo": {
+        "paused": false,
+        "ended": false,
+        "currentSrc": "http://127.0.0.1:61593/local/261984c9-6d29-40df-9e56-86478c0596c7/%20Ye%20-%20BIANCA%20%5B%E1%84%80%E1%85%A1%E1%84%89%E1%85%A1%E1%84%92%E1%85%A2%E1%84%89%E1%85%A5%E1%86%A8%5D.mp4",
+        "readyState": 4,
+        "networkState": 1,
+        "currentTime": 1.573583,
+        "duration": 152.007982,
+        "videoWidth": 1280,
+        "videoHeight": 720,
+        "error": null
+      },
+      "hostRoomTransferState": {
+        "phase": "ready",
+        "progress": 1,
+        "bytesReceived": 11219373,
+        "bytesPersisted": 11219373,
+        "bytesTotal": 11219373,
+        "bufferedUntilTime": 149.222,
+        "isPlaybackReady": true,
+        "availableRangeCount": 1,
+        "message": "Ready to play"
+      }
+    }
+  ]
+}
