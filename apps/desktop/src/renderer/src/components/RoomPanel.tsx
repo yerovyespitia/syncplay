@@ -140,6 +140,16 @@ function isOwnChatMessage(message: ChatMessage, selfId: string | null) {
   return message.kind !== "system" && message.senderParticipantId === selfId;
 }
 
+function formatTransferProgressLabel(transferState: TransferState) {
+  const percent = Math.round(transferState.progress * 100);
+
+  if (transferState.isPlaybackReady) {
+    return `Playback ready ${percent}%`;
+  }
+
+  return `Startup ready ${percent}%`;
+}
+
 export function RoomPanel({
   room,
   localFile,
@@ -175,7 +185,7 @@ export function RoomPanel({
     room.participants.length > 1 &&
     (room.mediaSource.type === "local_file" || room.mediaSource.type === "torrent_magnet") &&
     Boolean(room.transferState);
-  const isBufferingPlayback = room.transferState?.phase === "buffering";
+  const isBufferingPlayback = room.transferState?.phase === "buffering" && !room.transferState?.isPlaybackReady;
   const isResyncDisabled = isBufferingPlayback || room.participants.length <= 1;
   const playbackReadyPercent = room.transferState
     ? room.transferState.isPlaybackReady
@@ -444,7 +454,7 @@ export function RoomPanel({
                 <div>
                   <span className="stat-label">Transfer</span>
                   <strong>
-                    {room.transferState.phase} {Math.round(room.transferState.progress * 100)}%
+                    {formatTransferProgressLabel(room.transferState)}
                   </strong>
                 </div>
               ) : null}

@@ -1095,27 +1095,47 @@ select.text-input::-ms-expand {
 }
 
 .local-player-scrubber {
+  position: relative;
   display: flex;
   padding: 0 20px;
+  align-items: center;
 }
 
-.local-player-range,
+.local-player-scrubber-track {
+  position: absolute;
+  left: 20px;
+  right: 20px;
+  height: 12px;
+  border-radius: 999px;
+  background:
+    linear-gradient(
+      to right,
+      #ffffff 0 var(--player-progress, 0%),
+      rgba(255, 255, 255, 0.45) var(--player-progress, 0%) var(--player-buffered, 0%),
+      rgba(255, 255, 255, 0.18) var(--player-buffered, 0%) 100%
+    );
+  pointer-events: none;
+}
+
+.local-player-range {
+  appearance: none;
+  width: 100%;
+  position: relative;
+  z-index: 1;
+  background: transparent;
+  height: 12px;
+  cursor: pointer;
+}
+
 .local-player-volume {
   appearance: none;
+  width: 110px;
   background:
     linear-gradient(to right, #fff 0 var(--player-progress, 0%), rgba(255, 255, 255, 0.22) var(--player-progress, 0%) 100%);
   border-radius: 999px;
   height: 12px;
   cursor: pointer;
   transition: background 120ms ease;
-}
-
-.local-player-range {
-  width: 100%;
-}
-
-.local-player-volume {
-  width: 110px;
 }
 
 .local-player-range::-webkit-slider-runnable-track,

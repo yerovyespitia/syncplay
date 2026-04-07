@@ -77,11 +77,20 @@ interface LocalFileRoomPlayerProps {
 }
 
 const CHUNK_SIZE = 128 * 1024;
-const REQUEST_WINDOW_BYTES = 2 * 1024 * 1024;
+const REQUEST_WINDOW_BYTES = 8 * 1024 * 1024;
+const MIN_PROGRESSIVE_START_BYTES = 8 * 1024 * 1024;
+const MAX_PROGRESSIVE_START_BYTES = 32 * 1024 * 1024;
+const TRAILING_METADATA_WINDOW_BYTES = 4 * 1024 * 1024;
 const MIN_INITIAL_BUFFER_BYTES = 4 * 1024 * 1024;
 const MIN_INITIAL_BUFFER_SECONDS = 12;
+const MIN_READY_MEDIA_BUFFER_AHEAD_SECONDS = 3;
+const STARTUP_PREFETCH_TARGET_SECONDS = 24;
+const STREAMING_PREFETCH_TARGET_SECONDS = 14;
 const LOW_BUFFER_AHEAD_SECONDS = 6;
 const SEEK_RESUME_PADDING_SECONDS = 2;
+const MAX_PREFETCH_INFLIGHT_REQUESTS = 4;
+const MAX_PROGRESSIVE_SEEK_CHASE_AHEAD_SECONDS = 3;
+const LOCAL_SEEK_ACK_GRACE_MS = 2000;
 const TRANSFER_PROGRESS_BUCKET = 0.02;
 const BUFFERED_TIME_BUCKET_SECONDS = 5;
 const DRIFT_THRESHOLD_SECONDS = 1.2;
@@ -489,6 +498,8 @@ export function LocalFileRoomPlayer({
   const cacheIdRef = useRef<string | null>(null);
   const cacheMediaUrlRef = useRef<string | null>(null);
   const cacheFileUrlRef = useRef<string | null>(null);
+  const cacheHttpUrlRef = useRef<string | null>(null);
+  const cacheLocalHttpUrlRef = useRef<string | null>(null);
   const mediaUrlCandidatesRef = useRef<string[]>([]);
   const activeMediaUrlIndexRef = useRef(-1);
   const guestBrowserDirectoryRef = useRef<BrowserFileSystemDirectoryHandle | null>(null);
@@ -518,6 +529,10 @@ export function LocalFileRoomPlayer({
   const lastReportedTransferRef = useRef<TransferState | null>(null);
   const remoteParticipantIdRef = useRef<string | null>(null);
   const skipNextLocalPlayEventRef = useRef(false);
+  const forwardNextLocalPauseEventRef = useRef(false);
+  const suppressNextLocalPauseEventRef = useRef(false);
+  const pendingLocalSeekAckRef = useRef<{ time: number; issuedAt: number } | null>(null);
+  const pendingLocalPauseAckRef = useRef<number | null>(null);
   const localMessageRef = useRef("Waiting for peer connection");
   const controlsHideTimeoutRef = useRef<number | null>(null);
   const lastAudibleVolumeRef = useRef(1);
@@ -546,6 +561,9 @@ export function LocalFileRoomPlayer({
   const subtitleButtonTitle = hasSubtitleTrack ? "Subtitle options" : "Upload subtitles (.srt, .vtt)";
   const safeDuration = Math.max(duration, 0);
   const progressPercent = safeDuration > 0 ? Math.min(100, (currentTime / safeDuration) * 100) : 0;
+  const playableBufferedUntil =
+    safeDuration > 0 ? Math.min(safeDuration, Math.max(0, getPlayableBufferedUntil(videoRef.current) ?? 0)) : 0;
+  const bufferedPercent = safeDuration > 0 ? Math.min(100, (playableBufferedUntil / safeDuration) * 100) : 0;
   const volumePercent = Math.min(100, Math.max(0, (isMuted ? 0 : volume) * 100));
 
   function reportLocalDebug(message: string, details?: Record<string, unknown>) {
@@ -604,7 +622,7 @@ export function LocalFileRoomPlayer({
 
       if (message.type === "syncplay-local-media-meta") {
         responsePort.postMessage({
-          ok: contiguousBytesRef.current >= room.mediaSource.fileSize,
+          ok: true,
           fileName: room.mediaSource.fileName,
           fileSize: room.mediaSource.fileSize,
           mimeType: room.mediaSource.mimeType
@@ -893,6 +911,9 @@ export function LocalFileRoomPlayer({
         Math.abs(video.currentTime - remoteCommand.room.currentTime) > DRIFT_THRESHOLD_SECONDS;
 
       if (shouldReconcileSelfEvent) {
+        if (shouldDeferAuthoritativePlayback(video, remoteCommand.room)) {
+          return;
+        }
         debugLog(debugRole, "reconciling self-authored event", {
           action: remoteCommand.action,
           roomPlaybackState: remoteCommand.room.playbackState,
@@ -912,6 +933,10 @@ export function LocalFileRoomPlayer({
       return;
     }
 
+    if (shouldDeferAuthoritativePlayback(video, remoteCommand.room)) {
+      return;
+    }
+
     applyAuthoritativeState(video, remoteCommand.room);
     lastAppliedEventIdRef.current = remoteCommand.room.lastEventId;
   }, [mediaUrl, remoteCommand, selfId]);
@@ -921,6 +946,10 @@ export function LocalFileRoomPlayer({
       const video = videoRef.current;
 
       if (!video || !mediaUrl || room.playbackState !== "playing") {
+        return;
+      }
+
+      if (shouldDeferAuthoritativePlayback(video, room)) {
         return;
       }
 
@@ -1031,6 +1060,8 @@ export function LocalFileRoomPlayer({
         cacheId: cacheIdRef.current,
         cacheMediaUrl: cacheMediaUrlRef.current,
         cacheFileUrl: cacheFileUrlRef.current,
+        cacheHttpUrl: cacheHttpUrlRef.current,
+        cacheLocalHttpUrl: cacheLocalHttpUrlRef.current,
         mediaUrlCandidates: mediaUrlCandidatesRef.current,
         activeMediaUrlIndex: activeMediaUrlIndexRef.current,
         guestBrowserFallbackToMemory: guestBrowserFallbackToMemoryRef.current,
@@ -1072,12 +1103,14 @@ export function LocalFileRoomPlayer({
       return;
     }
 
-    if ((room.transferState?.bytesPersisted ?? 0) < room.mediaSource.fileSize) {
+    if (!hasMinimumProgressiveStartBytes()) {
       return;
     }
 
-    void finalizeGuestBrowserMedia("room-transfer-complete").finally(() => {
-      maybeActivateCompletedGuestMedia("room-transfer-complete");
+    void maybeActivateEarlyGuestMedia("progressive-threshold-reached").finally(() => {
+      if ((room.transferState?.bytesPersisted ?? 0) >= room.mediaSource.fileSize) {
+        void finalizeGuestBrowserMedia("room-transfer-complete");
+      }
     });
   }, [isHost, mediaUrl, room.mediaSource.fileSize, room.transferState?.bytesPersisted]);
 
@@ -1101,7 +1134,9 @@ export function LocalFileRoomPlayer({
     cacheIdRef.current = cacheHandle.cacheId;
     cacheMediaUrlRef.current = cacheHandle.mediaUrl;
     cacheFileUrlRef.current = cacheHandle.fileUrl;
-    mediaUrlCandidatesRef.current = [cacheHandle.localHttpUrl].filter(Boolean);
+    cacheHttpUrlRef.current = cacheHandle.httpUrl;
+    cacheLocalHttpUrlRef.current = cacheHandle.localHttpUrl;
+    mediaUrlCandidatesRef.current = [cacheHandle.httpUrl].filter(Boolean);
     activeMediaUrlIndexRef.current = -1;
 
     return cacheHandle;
@@ -1116,6 +1151,8 @@ export function LocalFileRoomPlayer({
     cacheIdRef.current = null;
     cacheMediaUrlRef.current = null;
     cacheFileUrlRef.current = null;
+    cacheHttpUrlRef.current = null;
+    cacheLocalHttpUrlRef.current = null;
     mediaUrlCandidatesRef.current = [];
     activeMediaUrlIndexRef.current = -1;
     await desktopApi.removeTempMediaCache(cacheId);
@@ -1426,9 +1463,13 @@ export function LocalFileRoomPlayer({
       return guestBrowserMediaUrlRef.current;
     }
 
+    if (!hasMinimumProgressiveStartBytes()) {
+      return null;
+    }
+
     const persistedBytes = Math.max(contiguousBytesRef.current, room.transferState?.bytesPersisted ?? 0);
 
-    if (persistedBytes < room.mediaSource.fileSize) {
+    if (persistedBytes <= 0) {
       return null;
     }
 
@@ -1453,10 +1494,6 @@ export function LocalFileRoomPlayer({
         }
 
         expectedStartByte += bytes.byteLength;
-      }
-
-      if (expectedStartByte < room.mediaSource.fileSize) {
-        return null;
       }
 
       const nextFile = new File(
@@ -1508,7 +1545,7 @@ export function LocalFileRoomPlayer({
       expectedStartByte += bytes.byteLength;
     }
 
-    if (expectedStartByte < room.mediaSource.fileSize) {
+    if (expectedStartByte < getProgressiveStartThresholdBytes()) {
       return null;
     }
 
@@ -1607,10 +1644,39 @@ export function LocalFileRoomPlayer({
   function maybeActivateCompletedGuestMedia(trigger: string) {
     const persistedBytes = Math.max(contiguousBytesRef.current, room.transferState?.bytesPersisted ?? 0);
 
-    if (isHost || mediaUrl || persistedBytes < room.mediaSource.fileSize) {
+    if (isHost || persistedBytes < room.mediaSource.fileSize) {
       return false;
     }
 
+    if (window.syncplayDesktop) {
+      const localHttpUrl = cacheLocalHttpUrlRef.current;
+
+      if (localHttpUrl && !mediaUrlCandidatesRef.current.includes(localHttpUrl)) {
+        mediaUrlCandidatesRef.current = [...mediaUrlCandidatesRef.current, localHttpUrl];
+      }
+
+      return false;
+    }
+
+    return switchToNextGuestMediaUrl(trigger);
+  }
+
+  async function maybeActivateEarlyGuestMedia(trigger: string) {
+    if (isHost || mediaUrl || !hasMinimumProgressiveStartBytes()) {
+      return false;
+    }
+
+    if (window.syncplayDesktop) {
+      const cacheHandle = await ensureTempCache();
+
+      if (!cacheHandle.cacheId) {
+        return false;
+      }
+
+      return switchToNextGuestMediaUrl(trigger);
+    }
+
+    await finalizeGuestBrowserMedia(trigger);
     return switchToNextGuestMediaUrl(trigger);
   }
 
@@ -1640,6 +1706,74 @@ export function LocalFileRoomPlayer({
       url: nextUrl
     });
     return true;
+  }
+
+  function isGuestCacheTransferComplete() {
+    if (isHost) {
+      return true;
+    }
+
+    return Math.max(contiguousBytesRef.current, room.transferState?.bytesPersisted ?? 0) >= room.mediaSource.fileSize;
+  }
+
+  function isUsingProgressiveGuestMediaUrl() {
+    if (!mediaUrl) {
+      return false;
+    }
+
+    return mediaUrl === cacheHttpUrlRef.current;
+  }
+
+  function canSeekThroughCurrentMediaSource() {
+    if (isHost) {
+      return true;
+    }
+
+    if (isGuestCacheTransferComplete()) {
+      return true;
+    }
+
+    return Boolean(cacheLocalHttpUrlRef.current) && mediaUrl === cacheLocalHttpUrlRef.current;
+  }
+
+  function shouldChaseAuthoritativeBufferTarget(video: HTMLVideoElement, authoritativeTime: number) {
+    if (canSeekThroughCurrentMediaSource()) {
+      return true;
+    }
+
+    const existingPendingSeekTime = pendingSeekTimeRef.current;
+
+    if (existingPendingSeekTime !== undefined) {
+      return Math.abs(existingPendingSeekTime - authoritativeTime) <= MAX_PROGRESSIVE_SEEK_CHASE_AHEAD_SECONDS;
+    }
+
+    return authoritativeTime - video.currentTime <= MAX_PROGRESSIVE_SEEK_CHASE_AHEAD_SECONDS;
+  }
+
+  function handleGuestVideoError() {
+    if (isHost) {
+      return false;
+    }
+
+    if (!isGuestCacheTransferComplete() && isUsingProgressiveGuestMediaUrl()) {
+      updateLocalMessage("Waiting for more media data");
+      requestNextRange(pendingSeekTimeRef.current !== undefined ? "seek" : "resume");
+      window.setTimeout(() => {
+        const retryVideo = videoRef.current;
+        retryVideo?.load();
+      }, 250);
+      return true;
+    }
+
+    if (switchToNextGuestMediaUrl("video-error")) {
+      window.setTimeout(() => {
+        const nextVideo = videoRef.current;
+        nextVideo?.load();
+      }, 0);
+      return true;
+    }
+
+    return false;
   }
 
   async function prepareHostMedia() {
@@ -1769,7 +1903,8 @@ export function LocalFileRoomPlayer({
       }
 
       updateLocalMessage("Preparing playback");
-      requestNextRange("initial");
+      requestTrailingMetadataRange();
+      maybeRequestProgressivePrefetch("initial");
     };
 
     channel.onmessage = (event) => {
@@ -1944,9 +2079,7 @@ export function LocalFileRoomPlayer({
         }
         maybePromotePlaybackReady();
         maybeResumePendingSeek();
-        if (shouldPrefetchMoreData()) {
-          requestNextRange(pendingSeekTimeRef.current !== undefined ? "seek" : "sequential");
-        }
+        maybeRequestProgressivePrefetch(pendingSeekTimeRef.current !== undefined ? "seek" : "sequential");
         return;
       case "buffer-ready":
         return;
@@ -2070,6 +2203,10 @@ export function LocalFileRoomPlayer({
       })
     );
 
+    if (hasMinimumProgressiveStartBytes()) {
+      await maybeActivateEarlyGuestMedia("progressive-buffer-ready");
+    }
+
     if (contiguousBytesRef.current >= room.mediaSource.fileSize) {
       await finalizeGuestBrowserMedia("all-bytes-persisted");
     }
@@ -2077,6 +2214,7 @@ export function LocalFileRoomPlayer({
     maybeActivateCompletedGuestMedia("all-bytes-persisted");
     maybePromotePlaybackReady();
     maybeResumePendingSeek();
+    maybeRequestProgressivePrefetch(pendingSeekTimeRef.current !== undefined ? "seek" : "sequential");
   }
 
   function maybePromotePlaybackReady() {
@@ -2089,12 +2227,15 @@ export function LocalFileRoomPlayer({
     }
 
     const video = videoRef.current;
-    const playableBufferedUntil = getPlayableBufferedUntil(video);
-    const hasPlayableFrame = hasCurrentPlayableData(video);
-    const isReady =
-      hasPlayableFrame &&
-      playableBufferedUntil !== undefined &&
-      playableBufferedUntil >= Math.max(MIN_INITIAL_BUFFER_SECONDS, room.currentTime + SEEK_RESUME_PADDING_SECONDS);
+
+    if (!video) {
+      return;
+    }
+
+    const actualMediaBufferedUntil = getMediaBufferedEnd(video);
+    const hasPlayableFrame = video.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA;
+    const hasProgressiveStartupBuffer = hasMinimumProgressiveStartBytes();
+    const isReady = hasPlayableFrame && hasProgressiveStartupBuffer;
 
     if (!isReady) {
       return;
@@ -2103,7 +2244,7 @@ export function LocalFileRoomPlayer({
     updateLocalMessage("Ready to play");
     publishTransferState(
       buildTransferState("ready", {
-        bufferedUntilTime: playableBufferedUntil,
+        bufferedUntilTime: actualMediaBufferedUntil ?? getExpectedBufferedUntil(video.currentTime),
         isPlaybackReady: true,
         message: "Ready to play"
       })
@@ -2113,7 +2254,7 @@ export function LocalFileRoomPlayer({
       dataChannelRef.current.send(
         JSON.stringify({
           type: "buffer-ready",
-          bufferedUntilTime: playableBufferedUntil
+          bufferedUntilTime: actualMediaBufferedUntil ?? getExpectedBufferedUntil(video.currentTime)
         } satisfies PeerControlMessage)
       );
     }
@@ -2145,7 +2286,7 @@ export function LocalFileRoomPlayer({
     pendingSeekTimeRef.current = undefined;
     pendingPlaybackRestoreRef.current = {
       time: pendingSeekTime,
-      shouldPlay: room.playbackState === "playing"
+      shouldPlay: room.playbackState === "playing" && pendingLocalPauseAckRef.current === null
     };
     updateLocalMessage(room.playbackState === "playing" ? "Playback resumed" : "Ready to play");
     publishTransferState(
@@ -2159,17 +2300,18 @@ export function LocalFileRoomPlayer({
 
   function requestNextRange(reason: RangeRequestReason) {
     if (isHost || !dataChannelRef.current || dataChannelRef.current.readyState !== "open") {
-      return;
+      return false;
     }
 
     const targetTime = pendingSeekTimeRef.current;
     const targetByte =
       targetTime !== undefined ? estimateByteOffset(targetTime, durationRef.current, room.mediaSource.fileSize) : undefined;
-    const preferredStartByte = reason === "seek" && targetByte !== undefined ? targetByte : contiguousBytesRef.current;
+    const preferredStartByte =
+      reason === "seek" && targetByte !== undefined ? targetByte : getNextRequestedStartByte(contiguousBytesRef.current);
     const startByte = getNextMissingStartByte(preferredStartByte);
 
     if (startByte >= room.mediaSource.fileSize) {
-      return;
+      return false;
     }
 
     const endByte = Math.min(
@@ -2178,6 +2320,77 @@ export function LocalFileRoomPlayer({
     );
 
     if (isRangeCoveredByAvailable(startByte, endByte) || isRangeCoveredByInflight(startByte, endByte)) {
+      return false;
+    }
+
+    requestSpecificRange(startByte, endByte, reason, targetTime);
+
+    if (reason === "seek" && targetTime !== undefined && dataChannelRef.current) {
+      dataChannelRef.current.send(
+        JSON.stringify({
+          type: "seek-buffering",
+          targetTime
+        } satisfies PeerControlMessage)
+      );
+    }
+
+    return true;
+  }
+
+  function maybeRequestProgressivePrefetch(reason: RangeRequestReason) {
+    if (isHost || !dataChannelRef.current || dataChannelRef.current.readyState !== "open") {
+      return;
+    }
+
+    if (contiguousBytesRef.current >= room.mediaSource.fileSize) {
+      return;
+    }
+
+    const targetTime = pendingSeekTimeRef.current;
+    const video = videoRef.current;
+    const bufferedAheadSeconds = getBufferedAheadSeconds(video);
+    const isPlaybackReady = lastReportedTransferRef.current?.isPlaybackReady ?? room.transferState?.isPlaybackReady ?? false;
+    const targetAheadSeconds =
+      targetTime !== undefined
+        ? SEEK_RESUME_PADDING_SECONDS * 2
+        : isPlaybackReady
+          ? STREAMING_PREFETCH_TARGET_SECONDS
+          : STARTUP_PREFETCH_TARGET_SECONDS;
+    const shouldAggressivelyPrefetch =
+      !mediaUrl || bufferedAheadSeconds === undefined || bufferedAheadSeconds < targetAheadSeconds;
+
+    if (!shouldAggressivelyPrefetch) {
+      return;
+    }
+
+    while (inFlightRequestsRef.current.length < MAX_PREFETCH_INFLIGHT_REQUESTS) {
+      if (!requestNextRange(reason)) {
+        break;
+      }
+    }
+  }
+
+  function requestTrailingMetadataRange() {
+    if (isHost || room.mediaSource.fileSize <= TRAILING_METADATA_WINDOW_BYTES) {
+      return;
+    }
+
+    const startByte = Math.max(0, room.mediaSource.fileSize - TRAILING_METADATA_WINDOW_BYTES);
+    const endByte = room.mediaSource.fileSize;
+
+    if (isRangeCoveredByAvailable(startByte, endByte) || isRangeCoveredByInflight(startByte, endByte)) {
+      return;
+    }
+
+    requestSpecificRange(startByte, endByte, "resume");
+  }
+
+  function requestSpecificRange(startByte: number, endByte: number, reason: RangeRequestReason, targetTime?: number) {
+    if (isHost || !dataChannelRef.current || dataChannelRef.current.readyState !== "open") {
+      return;
+    }
+
+    if (startByte >= endByte || startByte >= room.mediaSource.fileSize) {
       return;
     }
 
@@ -2188,7 +2401,7 @@ export function LocalFileRoomPlayer({
 
     const effectiveTransferState = lastReportedTransferRef.current ?? room.transferState;
     const nextPhase =
-      reason === "initial"
+      reason === "initial" || reason === "resume"
         ? "buffering"
         : effectiveTransferState?.isPlaybackReady
           ? room.playbackState === "playing"
@@ -2198,7 +2411,7 @@ export function LocalFileRoomPlayer({
     const nextMessage =
       reason === "seek" && targetTime !== undefined
         ? `Buffering at ${formatTime(targetTime)}`
-        : reason === "initial"
+        : reason === "initial" || reason === "resume"
           ? "Preparing playback"
           : effectiveTransferState?.isPlaybackReady
             ? room.playbackState === "playing"
@@ -2224,27 +2437,6 @@ export function LocalFileRoomPlayer({
         lastRequestedRange: requestRange
       })
     );
-
-    if (reason === "seek" && targetTime !== undefined && dataChannelRef.current) {
-      dataChannelRef.current.send(
-        JSON.stringify({
-          type: "seek-buffering",
-          targetTime
-        } satisfies PeerControlMessage)
-      );
-    }
-  }
-
-  function shouldPrefetchMoreData() {
-    if (availableRangesRef.current.length === 0 || contiguousBytesRef.current >= room.mediaSource.fileSize) {
-      return false;
-    }
-
-    if (mediaUrl) {
-      return false;
-    }
-
-    return true;
   }
 
   function handlePlay() {
@@ -2287,6 +2479,8 @@ export function LocalFileRoomPlayer({
         currentTime: video.currentTime,
         bufferedUntilTime
       });
+      suppressNextLocalPauseEventRef.current = true;
+      forwardNextLocalPauseEventRef.current = false;
       video.pause();
       pendingSeekTimeRef.current = video.currentTime;
       requestNextRange("seek");
@@ -2308,6 +2502,29 @@ export function LocalFileRoomPlayer({
         hasVideo: Boolean(video),
         suppressing: suppressEventsRef.current,
         hasMediaUrl: Boolean(mediaUrl)
+      });
+      return;
+    }
+
+    if (forwardNextLocalPauseEventRef.current) {
+      forwardNextLocalPauseEventRef.current = false;
+      suppressNextLocalPauseEventRef.current = false;
+      pendingSeekTimeRef.current = undefined;
+      pendingPlaybackRestoreRef.current = null;
+      setIsPlaying(false);
+      debugLog(debugRole, "handlePause forwarding user pause", {
+        currentTime: video.currentTime
+      });
+      onPause(video.currentTime);
+      return;
+    }
+
+    if (suppressNextLocalPauseEventRef.current) {
+      suppressNextLocalPauseEventRef.current = false;
+      forwardNextLocalPauseEventRef.current = false;
+      debugLog(debugRole, "handlePause ignored internal buffering pause", {
+        currentTime: video.currentTime,
+        pendingSeekTime: pendingSeekTimeRef.current
       });
       return;
     }
@@ -2381,11 +2598,21 @@ export function LocalFileRoomPlayer({
     const bufferedUntilTime = getPlayableBufferedUntil(video);
 
     if (bufferedUntilTime !== undefined && video.currentTime <= bufferedUntilTime - SEEK_RESUME_PADDING_SECONDS) {
+      pendingLocalSeekAckRef.current = {
+        time: video.currentTime,
+        issuedAt: Date.now()
+      };
       onSeek(video.currentTime);
       return;
     }
 
     pendingSeekTimeRef.current = video.currentTime;
+    pendingLocalSeekAckRef.current = {
+      time: video.currentTime,
+      issuedAt: Date.now()
+    };
+    suppressNextLocalPauseEventRef.current = true;
+    forwardNextLocalPauseEventRef.current = false;
     video.pause();
     onSeek(video.currentTime);
     requestNextRange("seek");
@@ -2479,6 +2706,7 @@ export function LocalFileRoomPlayer({
     }
 
     if (video.paused) {
+      pendingLocalPauseAckRef.current = null;
       if (isPlaybackAtEnd(video, durationRef.current)) {
         restartPlaybackFromBeginning(video, { shouldResume: true });
         return;
@@ -2488,6 +2716,13 @@ export function LocalFileRoomPlayer({
       return;
     }
 
+    pendingLocalPauseAckRef.current = Date.now();
+    forwardNextLocalPauseEventRef.current = false;
+    suppressNextLocalPauseEventRef.current = true;
+    pendingSeekTimeRef.current = undefined;
+    pendingPlaybackRestoreRef.current = null;
+    setIsPlaying(false);
+    onPause(video.currentTime);
     video.pause();
   }
 
@@ -2817,12 +3052,7 @@ export function LocalFileRoomPlayer({
               readyState: video?.readyState,
               currentSrc: video?.currentSrc ?? null
             });
-            if (!isHost && switchToNextGuestMediaUrl("video-error")) {
-              window.setTimeout(() => {
-                const nextVideo = videoRef.current;
-                nextVideo?.load();
-              }, 0);
-            }
+            handleGuestVideoError();
           }}
           onPlay={handlePlay}
           onPause={handlePause}
@@ -2946,6 +3176,16 @@ export function LocalFileRoomPlayer({
 
           <div className="local-player-bottom">
             <div className="local-player-scrubber">
+              <div
+                className="local-player-scrubber-track"
+                aria-hidden="true"
+                style={
+                  {
+                    "--player-progress": `${progressPercent}%`,
+                    "--player-buffered": `${Math.max(progressPercent, bufferedPercent)}%`
+                  } as React.CSSProperties
+                }
+              />
               <input
                 className="local-player-range"
                 type="range"
@@ -2959,11 +3199,6 @@ export function LocalFileRoomPlayer({
                 }}
                 disabled={!mediaUrl || duration <= 0 || showLoadingOverlay}
                 aria-label="Playback timeline"
-                style={
-                  {
-                    "--player-progress": `${progressPercent}%`
-                  } as React.CSSProperties
-                }
               />
             </div>
 
@@ -3083,7 +3318,7 @@ export function LocalFileRoomPlayer({
           {room.transferState ? (
             <>
               <span>
-                {room.transferState.phase} {Math.round(room.transferState.progress * 100)}%
+                {formatTransferProgressLabel(room.transferState)}
               </span>
               {room.transferState.bufferedUntilTime !== undefined ? (
                 <span>Buffered to {formatTime(room.transferState.bufferedUntilTime)}</span>
@@ -3098,7 +3333,6 @@ export function LocalFileRoomPlayer({
   function applyAuthoritativeState(video: HTMLVideoElement, authoritativeRoom: RoomState) {
     suppressEventsRef.current = true;
     setIsPlaying(authoritativeRoom.playbackState === "playing");
-    setCurrentTime(authoritativeRoom.currentTime);
     debugLog(debugRole, "applyAuthoritativeState", {
       playbackState: authoritativeRoom.playbackState,
       currentTime: authoritativeRoom.currentTime,
@@ -3113,24 +3347,25 @@ export function LocalFileRoomPlayer({
       lastEventId: authoritativeRoom.lastEventId
     });
 
-    const canSeekThroughMediaSource =
-      isHost ||
-      Boolean(window.syncplayDesktop) ||
-      contiguousBytesRef.current >= room.mediaSource.fileSize ||
-      (room.transferState?.bytesPersisted ?? 0) >= room.mediaSource.fileSize;
+    const canSeekThroughMediaSource = canSeekThroughCurrentMediaSource();
     const playableBufferedUntil = isHost ? Number.POSITIVE_INFINITY : getPlayableBufferedUntil(video);
-
-    if (
+    const shouldAwaitBufferedPlayback =
       !isHost &&
       !canSeekThroughMediaSource &&
-      playableBufferedUntil !== undefined &&
-      authoritativeRoom.currentTime > playableBufferedUntil - 0.25
-    ) {
-      pendingSeekTimeRef.current = authoritativeRoom.currentTime;
-      requestNextRange("seek");
+      ((!hasCurrentPlayableData(video) && authoritativeRoom.playbackState === "playing") ||
+        (playableBufferedUntil !== undefined && authoritativeRoom.currentTime > playableBufferedUntil - 0.25));
+    const shouldChaseAuthoritativeTime = shouldChaseAuthoritativeBufferTarget(video, authoritativeRoom.currentTime);
+
+    if (shouldAwaitBufferedPlayback) {
+      pendingSeekTimeRef.current = shouldChaseAuthoritativeTime ? authoritativeRoom.currentTime : undefined;
+      setCurrentTime(video.currentTime);
+      maybeRequestProgressivePrefetch(shouldChaseAuthoritativeTime ? "seek" : "sequential");
     } else if (Math.abs(video.currentTime - authoritativeRoom.currentTime) > DRIFT_THRESHOLD_SECONDS) {
       ignoredProgrammaticSeekTimeRef.current = authoritativeRoom.currentTime;
       video.currentTime = authoritativeRoom.currentTime;
+      setCurrentTime(authoritativeRoom.currentTime);
+    } else {
+      setCurrentTime(video.currentTime);
     }
 
     if (authoritativeRoom.playbackState === "playing") {
@@ -3138,18 +3373,18 @@ export function LocalFileRoomPlayer({
 
       if (!isHost && !canSeekThroughMediaSource && !hasCurrentPlayableData(video)) {
         pendingPlaybackRestoreRef.current = {
-          time: authoritativeRoom.currentTime,
+          time: shouldChaseAuthoritativeTime ? authoritativeRoom.currentTime : video.currentTime,
           shouldPlay: true
         };
-        pendingSeekTimeRef.current = authoritativeRoom.currentTime;
-        requestNextRange("seek");
+        pendingSeekTimeRef.current = shouldChaseAuthoritativeTime ? authoritativeRoom.currentTime : undefined;
+        maybeRequestProgressivePrefetch(shouldChaseAuthoritativeTime ? "seek" : "sequential");
       } else if (
         !canSeekThroughMediaSource &&
         bufferedUntilTime !== undefined &&
         authoritativeRoom.currentTime > bufferedUntilTime - 0.25
       ) {
-        pendingSeekTimeRef.current = authoritativeRoom.currentTime;
-        requestNextRange("seek");
+        pendingSeekTimeRef.current = shouldChaseAuthoritativeTime ? authoritativeRoom.currentTime : undefined;
+        maybeRequestProgressivePrefetch(shouldChaseAuthoritativeTime ? "seek" : "sequential");
       } else {
         void video
           .play()
@@ -3191,11 +3426,7 @@ export function LocalFileRoomPlayer({
       return;
     }
 
-    const canSeekThroughMediaSource =
-      isHost ||
-      Boolean(window.syncplayDesktop) ||
-      contiguousBytesRef.current >= room.mediaSource.fileSize ||
-      (room.transferState?.bytesPersisted ?? 0) >= room.mediaSource.fileSize;
+    const canSeekThroughMediaSource = canSeekThroughCurrentMediaSource();
     const playableBufferedUntil = isHost ? Number.POSITIVE_INFINITY : getPlayableBufferedUntil(video);
     const canRestoreAtTarget =
       canSeekThroughMediaSource ||
@@ -3210,7 +3441,7 @@ export function LocalFileRoomPlayer({
         playableBufferedUntil
       });
       pendingSeekTimeRef.current = pendingPlaybackRestore.time;
-      requestNextRange("seek");
+      maybeRequestProgressivePrefetch("seek");
       return;
     }
 
@@ -3225,7 +3456,7 @@ export function LocalFileRoomPlayer({
     video.currentTime = pendingPlaybackRestore.time;
     setCurrentTime(pendingPlaybackRestore.time);
 
-    if (pendingPlaybackRestore.shouldPlay) {
+    if (pendingPlaybackRestore.shouldPlay && pendingLocalPauseAckRef.current === null) {
       void video
         .play()
         .then(() => {
@@ -3321,6 +3552,29 @@ export function LocalFileRoomPlayer({
     return preferredStartByte;
   }
 
+  function getNextRequestedStartByte(preferredStartByte: number) {
+    const requestedRanges = inFlightRequestsRef.current.reduce(
+      (ranges, range) =>
+        mergeRanges(ranges, {
+          startByte: range.startByte,
+          endByte: range.endByte
+        }),
+      availableRangesRef.current
+    );
+
+    for (const range of requestedRanges) {
+      if (preferredStartByte < range.startByte) {
+        return preferredStartByte;
+      }
+
+      if (preferredStartByte >= range.startByte && preferredStartByte < range.endByte) {
+        return range.endByte;
+      }
+    }
+
+    return preferredStartByte;
+  }
+
   function sumRangeBytes(ranges: ByteRange[]) {
     return ranges.reduce((total, range) => total + Math.max(0, range.endByte - range.startByte), 0);
   }
@@ -3328,6 +3582,26 @@ export function LocalFileRoomPlayer({
   function getLastRequestedRange() {
     const inFlightRequests = inFlightRequestsRef.current;
     return inFlightRequests[inFlightRequests.length - 1];
+  }
+
+  function getBufferedAheadSeconds(video: HTMLVideoElement | null) {
+    if (!video) {
+      return undefined;
+    }
+
+    const mediaBufferedUntil = getMediaBufferedEnd(video);
+
+    if (mediaBufferedUntil !== undefined) {
+      return Math.max(0, mediaBufferedUntil - video.currentTime);
+    }
+
+    const expectedBufferedUntil = getExpectedBufferedUntil(video.currentTime);
+
+    if (expectedBufferedUntil !== undefined) {
+      return Math.max(0, expectedBufferedUntil - video.currentTime);
+    }
+
+    return undefined;
   }
 
   function buildTransferState(phase: TransferState["phase"], overrides: Partial<TransferState> = {}): TransferState {
@@ -3438,6 +3712,73 @@ export function LocalFileRoomPlayer({
       await peer.addIceCandidate(new RTCIceCandidate(candidate));
     }
   }
+
+  function getProgressiveStartThresholdBytes() {
+    const estimatedBytesFromDuration =
+      durationRef.current > 0
+        ? estimateByteOffset(
+            Math.max(MIN_INITIAL_BUFFER_SECONDS, SEEK_RESUME_PADDING_SECONDS * 2),
+            durationRef.current,
+            room.mediaSource.fileSize
+          )
+        : 0;
+    const boundedEstimate = estimatedBytesFromDuration
+      ? Math.min(MAX_PROGRESSIVE_START_BYTES, Math.max(MIN_PROGRESSIVE_START_BYTES, estimatedBytesFromDuration))
+      : MIN_PROGRESSIVE_START_BYTES;
+
+    return Math.min(room.mediaSource.fileSize, Math.max(MIN_INITIAL_BUFFER_BYTES, boundedEstimate));
+  }
+
+  function hasMinimumProgressiveStartBytes() {
+    return contiguousBytesRef.current >= getProgressiveStartThresholdBytes();
+  }
+
+  function shouldDeferAuthoritativePlayback(video: HTMLVideoElement, authoritativeRoom: RoomState) {
+    if (isHost) {
+      return false;
+    }
+
+    const pendingLocalPauseAck = pendingLocalPauseAckRef.current;
+
+    if (pendingLocalPauseAck !== null) {
+      if (authoritativeRoom.playbackState === "paused") {
+        pendingLocalPauseAckRef.current = null;
+      } else if (Date.now() - pendingLocalPauseAck <= LOCAL_SEEK_ACK_GRACE_MS) {
+        debugLog(debugRole, "deferring stale authoritative playback update during local pause", {
+          localCurrentTime: video.currentTime,
+          authoritativeTime: authoritativeRoom.currentTime,
+          lastEventId: authoritativeRoom.lastEventId
+        });
+        return true;
+      } else {
+        pendingLocalPauseAckRef.current = null;
+      }
+    }
+
+    const pendingLocalSeekAck = pendingLocalSeekAckRef.current;
+
+    if (!pendingLocalSeekAck) {
+      return false;
+    }
+
+    if (Math.abs(authoritativeRoom.currentTime - pendingLocalSeekAck.time) <= DRIFT_THRESHOLD_SECONDS) {
+      pendingLocalSeekAckRef.current = null;
+      return false;
+    }
+
+    if (Date.now() - pendingLocalSeekAck.issuedAt > LOCAL_SEEK_ACK_GRACE_MS) {
+      pendingLocalSeekAckRef.current = null;
+      return false;
+    }
+
+    debugLog(debugRole, "deferring stale authoritative playback update during local seek", {
+      localCurrentTime: video.currentTime,
+      pendingSeekTime: pendingLocalSeekAck.time,
+      authoritativeTime: authoritativeRoom.currentTime,
+      lastEventId: authoritativeRoom.lastEventId
+    });
+    return true;
+  }
 }
 
 function debugLog(role: "host" | "guest", message: string, details?: Record<string, unknown>) {
@@ -3516,6 +3857,16 @@ function formatTime(totalSeconds: number) {
   const minutes = Math.floor(safeSeconds / 60).toString();
   const seconds = (safeSeconds % 60).toString().padStart(2, "0");
   return `${minutes}:${seconds}`;
+}
+
+function formatTransferProgressLabel(transferState: TransferState) {
+  const percent = Math.round(transferState.progress * 100);
+
+  if (transferState.isPlaybackReady) {
+    return `Playback ready ${percent}%`;
+  }
+
+  return `Startup ready ${percent}%`;
 }
 
 function getMediaBufferedEnd(video: HTMLVideoElement | null) {
