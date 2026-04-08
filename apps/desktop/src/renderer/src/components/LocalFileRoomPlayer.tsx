@@ -715,7 +715,13 @@ export function LocalFileRoomPlayer({
         revokeSubtitleUrl();
       }
     };
-  }, [room.subtitleTrack]);
+  }, [
+    room.subtitleTrack?.content,
+    room.subtitleTrack?.fileName,
+    room.subtitleTrack?.format,
+    room.subtitleTrack?.uploadedAt,
+    room.subtitleTrack?.uploadedByParticipantId
+  ]);
 
   useEffect(() => {
     syncSubtitleTrackMode();
@@ -1072,6 +1078,9 @@ export function LocalFileRoomPlayer({
         role: debugRole,
         roomId: room.roomId,
         mediaUrl,
+        isCaptionsEnabled,
+        subtitleFileName: room.subtitleTrack?.fileName ?? null,
+        activeSubtitleLines,
         cacheId: cacheIdRef.current,
         cacheMediaUrl: cacheMediaUrlRef.current,
         cacheFileUrl: cacheFileUrlRef.current,
@@ -1104,14 +1113,33 @@ export function LocalFileRoomPlayer({
                   }
                 : null
             }
-          : null
-      })
+          : null,
+        textTracks: videoRef.current
+          ? Array.from(videoRef.current.textTracks).map((track) => ({
+              mode: track.mode,
+              kind: track.kind,
+              label: track.label,
+              language: track.language,
+              activeCueCount: track.activeCues?.length ?? 0
+            }))
+          : []
+      }),
+      setCaptionsEnabled: (nextValue: boolean) => {
+        setIsCaptionsEnabled(nextValue);
+        setIsSubtitleMenuOpen(false);
+        return true;
+      },
+      toggleCaptions: () => {
+        setIsCaptionsEnabled((current) => !current);
+        setIsSubtitleMenuOpen(false);
+        return true;
+      }
     };
 
     return () => {
       delete window.__syncplayLocalPlayerDebug;
     };
-  }, [debugRole, desktopApi, mediaUrl, onSubtitleTrackChange, room, selfId]);
+  }, [activeSubtitleLines, debugRole, desktopApi, isCaptionsEnabled, mediaUrl, onSubtitleTrackChange, room, selfId]);
 
   useEffect(() => {
     if (isHost || mediaUrl) {

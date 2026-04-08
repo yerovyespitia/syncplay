@@ -17,6 +17,8 @@ declare global {
       getState: () => unknown;
       uploadSubtitleByPath: (filePath: string) => Promise<boolean>;
       sampleGuestBytes: (startByte: number, length: number) => number[];
+      setCaptionsEnabled: (nextValue: boolean) => void;
+      toggleCaptions: () => void;
     };
     __syncplayLocalMediaServiceWorkerReady?: Promise<ServiceWorkerRegistration | null>;
   }
