@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 
 import type {
   ByteRange,
@@ -493,7 +493,9 @@ export function LocalFileRoomPlayer({
   const pendingChunkMetaQueueRef = useRef<ByteRange[]>([]);
   const availableRangesRef = useRef<ByteRange[]>([]);
   const contiguousBytesRef = useRef(0);
-  const inFlightRequestsRef = useRef<Array<ByteRange & { reason: RangeRequestReason; targetTime?: number }>>([]);
+  const inFlightRequestsRef = useRef<Array<ByteRange & { reason: RangeRequestReason; targetTime?: number; issuedAt: number }>>(
+    []
+  );
   const objectUrlRef = useRef<string | null>(null);
   const cacheIdRef = useRef<string | null>(null);
   const cacheMediaUrlRef = useRef<string | null>(null);
@@ -519,8 +521,11 @@ export function LocalFileRoomPlayer({
   const guestBrowserPersistedFileRef = useRef<File | null>(null);
   const guestBrowserPersistedBytesRef = useRef(0);
   const pendingSeekTimeRef = useRef<number | undefined>(undefined);
-  const ignoredProgrammaticSeekTimeRef = useRef<number | undefined>(undefined);
-  const dispatchedLocalSeekTimeRef = useRef<number | undefined>(undefined);
+  const ignoredProgrammaticSeekTimesRef = useRef<Array<{ time: number; issuedAt: number }>>([]);
+  const dispatchedLocalSeekTimesRef = useRef<Array<{ time: number; issuedAt: number }>>([]);
+  const latestRequestedProgrammaticSeekRef = useRef<{ time: number; issuedAt: number } | null>(null);
+  const latestRequestedLocalSeekRef = useRef<{ time: number; issuedAt: number } | null>(null);
+  const latestSeekIntentRef = useRef<{ time: number; issuedAt: number } | null>(null);
   const reconnectAttemptRef = useRef(0);
   const preparingHostMediaRef = useRef(false);
   const durationRef = useRef(room.mediaSource.duration ?? 0);
@@ -532,6 +537,7 @@ export function LocalFileRoomPlayer({
   const forwardNextLocalPauseEventRef = useRef(false);
   const suppressNextLocalPauseEventRef = useRef(false);
   const pendingLocalSeekAckRef = useRef<{ time: number; issuedAt: number } | null>(null);
+  const pendingLocalPlayAckRef = useRef<number | null>(null);
   const pendingLocalPauseAckRef = useRef<number | null>(null);
   const localMessageRef = useRef("Waiting for peer connection");
   const controlsHideTimeoutRef = useRef<number | null>(null);
@@ -902,6 +908,15 @@ export function LocalFileRoomPlayer({
     const video = videoRef.current;
 
     if (!video || !remoteCommand || !mediaUrl) {
+      return;
+    }
+
+    if (lastAppliedEventIdRef.current > remoteCommand.room.lastEventId) {
+      debugLog(debugRole, "ignoring stale remote command", {
+        kind: remoteCommand.kind,
+        remoteLastEventId: remoteCommand.room.lastEventId,
+        lastAppliedEventId: lastAppliedEventIdRef.current
+      });
       return;
     }
 
@@ -2066,6 +2081,12 @@ export function LocalFileRoomPlayer({
         ];
         return;
       case "range-complete":
+        const matchingRequest = inFlightRequestsRef.current.find(
+          (request) =>
+            request.startByte === message.startByte &&
+            request.reason === message.reason &&
+            request.targetTime === message.targetTime
+        );
         inFlightRequestsRef.current = inFlightRequestsRef.current.filter(
           (request) =>
             !(
@@ -2074,7 +2095,11 @@ export function LocalFileRoomPlayer({
               request.targetTime === message.targetTime
             )
         );
-        if (message.reason === "seek" && typeof message.targetTime === "number") {
+        if (
+          message.reason === "seek" &&
+          typeof message.targetTime === "number" &&
+          !isStaleSeekCompletion(message.targetTime, matchingRequest?.issuedAt)
+        ) {
           pendingSeekTimeRef.current = message.targetTime;
         }
         maybePromotePlaybackReady();
@@ -2394,9 +2419,17 @@ export function LocalFileRoomPlayer({
       return;
     }
 
+    const requestIssuedAt =
+      reason === "seek" && targetTime !== undefined
+        ? latestSeekIntentRef.current && Math.abs(latestSeekIntentRef.current.time - targetTime) <= 0.5
+          ? latestSeekIntentRef.current.issuedAt
+          : Date.now()
+        : Date.now();
+
     const requestRange = {
       startByte,
-      endByte
+      endByte,
+      issuedAt: requestIssuedAt
     };
 
     const effectiveTransferState = lastReportedTransferRef.current ?? room.transferState;
@@ -2487,6 +2520,8 @@ export function LocalFileRoomPlayer({
       return;
     }
 
+    pendingLocalPlayAckRef.current = Date.now();
+    pendingLocalPauseAckRef.current = null;
     setIsPlaying(true);
     debugLog(debugRole, "handlePlay forwarding play", {
       currentTime: video.currentTime
@@ -2511,6 +2546,7 @@ export function LocalFileRoomPlayer({
       suppressNextLocalPauseEventRef.current = false;
       pendingSeekTimeRef.current = undefined;
       pendingPlaybackRestoreRef.current = null;
+      pendingLocalPlayAckRef.current = null;
       setIsPlaying(false);
       debugLog(debugRole, "handlePause forwarding user pause", {
         currentTime: video.currentTime
@@ -2550,6 +2586,7 @@ export function LocalFileRoomPlayer({
       }
     }
 
+    pendingLocalPlayAckRef.current = null;
     setIsPlaying(false);
     debugLog(debugRole, "handlePause forwarding pause", {
       currentTime: video.currentTime
@@ -2564,25 +2601,66 @@ export function LocalFileRoomPlayer({
       return;
     }
 
-    const ignoredProgrammaticSeekTime = ignoredProgrammaticSeekTimeRef.current;
-    if (
-      ignoredProgrammaticSeekTime !== undefined &&
-      Math.abs(video.currentTime - ignoredProgrammaticSeekTime) <= 0.5
-    ) {
-      ignoredProgrammaticSeekTimeRef.current = undefined;
+    const ignoredProgrammaticSeek = consumeMatchingRecentSeek(
+      ignoredProgrammaticSeekTimesRef,
+      video.currentTime,
+      0.5
+    );
+    if (ignoredProgrammaticSeek) {
+      const latestRequestedProgrammaticSeek = latestRequestedProgrammaticSeekRef.current;
+
+      if (
+        latestRequestedProgrammaticSeek &&
+        latestRequestedProgrammaticSeek.issuedAt > ignoredProgrammaticSeek.issuedAt &&
+        Math.abs(latestRequestedProgrammaticSeek.time - video.currentTime) > 0.5
+      ) {
+        video.currentTime = latestRequestedProgrammaticSeek.time;
+        setCurrentTime(latestRequestedProgrammaticSeek.time);
+        return;
+      }
+
+      if (
+        latestRequestedProgrammaticSeek &&
+        Math.abs(latestRequestedProgrammaticSeek.time - ignoredProgrammaticSeek.time) <= 0.5
+      ) {
+        latestRequestedProgrammaticSeekRef.current = null;
+      }
+
       debugLog(debugRole, "handleSeeked ignored programmatic seek", {
         currentTime: video.currentTime,
-        ignoredProgrammaticSeekTime
+        ignoredProgrammaticSeekTime: ignoredProgrammaticSeek.time
       });
       return;
     }
 
-    const dispatchedLocalSeekTime = dispatchedLocalSeekTimeRef.current;
-    if (dispatchedLocalSeekTime !== undefined && Math.abs(video.currentTime - dispatchedLocalSeekTime) <= 0.5) {
-      dispatchedLocalSeekTimeRef.current = undefined;
+    const dispatchedLocalSeek = consumeMatchingRecentSeek(
+      dispatchedLocalSeekTimesRef,
+      video.currentTime,
+      0.5
+    );
+    if (dispatchedLocalSeek) {
+      const latestRequestedLocalSeek = latestRequestedLocalSeekRef.current;
+
+      if (
+        latestRequestedLocalSeek &&
+        latestRequestedLocalSeek.issuedAt > dispatchedLocalSeek.issuedAt &&
+        Math.abs(latestRequestedLocalSeek.time - video.currentTime) > 0.5
+      ) {
+        video.currentTime = latestRequestedLocalSeek.time;
+        setCurrentTime(latestRequestedLocalSeek.time);
+        return;
+      }
+
+      if (
+        latestRequestedLocalSeek &&
+        Math.abs(latestRequestedLocalSeek.time - dispatchedLocalSeek.time) <= 0.5
+      ) {
+        latestRequestedLocalSeekRef.current = null;
+      }
+
       debugLog(debugRole, "handleSeeked ignored already-dispatched local seek", {
         currentTime: video.currentTime,
-        dispatchedLocalSeekTime
+        dispatchedLocalSeekTime: dispatchedLocalSeek.time
       });
       return;
     }
@@ -2706,17 +2784,17 @@ export function LocalFileRoomPlayer({
     }
 
     if (video.paused) {
-      pendingLocalPauseAckRef.current = null;
       if (isPlaybackAtEnd(video, durationRef.current)) {
         restartPlaybackFromBeginning(video, { shouldResume: true });
         return;
       }
 
-      void video.play();
+      requestLocalPlayback(video);
       return;
     }
 
     pendingLocalPauseAckRef.current = Date.now();
+    pendingLocalPlayAckRef.current = null;
     forwardNextLocalPauseEventRef.current = false;
     suppressNextLocalPauseEventRef.current = true;
     pendingSeekTimeRef.current = undefined;
@@ -2733,21 +2811,34 @@ export function LocalFileRoomPlayer({
       return;
     }
 
+    const seekAnchorTime = getSeekAnchorTime(video);
     const videoDuration = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : durationRef.current;
-    const maxTime = Number.isFinite(videoDuration) && videoDuration > 0 ? videoDuration : Math.max(video.currentTime + offsetSeconds, 0);
-    const nextTime = Math.min(Math.max(video.currentTime + offsetSeconds, 0), maxTime);
+    const maxTime = Number.isFinite(videoDuration) && videoDuration > 0 ? videoDuration : Math.max(seekAnchorTime + offsetSeconds, 0);
+    const nextTime = Math.min(Math.max(seekAnchorTime + offsetSeconds, 0), maxTime);
 
-    if (Math.abs(nextTime - video.currentTime) < 0.01) {
+    if (Math.abs(nextTime - seekAnchorTime) < 0.01) {
       return;
     }
 
-    video.currentTime = nextTime;
-    setCurrentTime(nextTime);
+    applyImmediateSeek(video, nextTime);
+  }
 
-    if (isHost) {
-      dispatchedLocalSeekTimeRef.current = nextTime;
-      onSeek(nextTime);
+  function getSeekAnchorTime(video: HTMLVideoElement) {
+    const latestSeekIntent = latestSeekIntentRef.current;
+
+    if (!latestSeekIntent) {
+      return video.currentTime;
     }
+
+    if (Date.now() - latestSeekIntent.issuedAt > LOCAL_SEEK_ACK_GRACE_MS) {
+      return video.currentTime;
+    }
+
+    if (Math.abs(latestSeekIntent.time - video.currentTime) <= 0.05) {
+      return video.currentTime;
+    }
+
+    return latestSeekIntent.time;
   }
 
   function restartPlaybackFromBeginning(video: HTMLVideoElement, options?: { shouldResume?: boolean }) {
@@ -2760,7 +2851,8 @@ export function LocalFileRoomPlayer({
       return;
     }
 
-    dispatchedLocalSeekTimeRef.current = restartTime;
+    latestRequestedLocalSeekRef.current = pushRecentSeek(dispatchedLocalSeekTimesRef, restartTime);
+    latestSeekIntentRef.current = latestRequestedLocalSeekRef.current;
     pendingSeekTimeRef.current = undefined;
     video.currentTime = restartTime;
     setCurrentTime(restartTime);
@@ -2779,6 +2871,8 @@ export function LocalFileRoomPlayer({
 
   function resumePlaybackAfterRestart(video: HTMLVideoElement, restartTime: number) {
     skipNextLocalPlayEventRef.current = true;
+    pendingLocalPlayAckRef.current = Date.now();
+    pendingLocalPauseAckRef.current = null;
     setIsPlaying(true);
     onPlay(restartTime);
     void video.play();
@@ -2792,13 +2886,7 @@ export function LocalFileRoomPlayer({
     }
 
     const nextTime = Number(event.target.value);
-    video.currentTime = nextTime;
-    setCurrentTime(nextTime);
-
-    if (isHost) {
-      dispatchedLocalSeekTimeRef.current = nextTime;
-      onSeek(nextTime);
-    }
+    applyImmediateSeek(video, nextTime);
   }
 
   function handleVolumeInput(event: React.ChangeEvent<HTMLInputElement>) {
@@ -3361,10 +3449,16 @@ export function LocalFileRoomPlayer({
       setCurrentTime(video.currentTime);
       maybeRequestProgressivePrefetch(shouldChaseAuthoritativeTime ? "seek" : "sequential");
     } else if (Math.abs(video.currentTime - authoritativeRoom.currentTime) > DRIFT_THRESHOLD_SECONDS) {
-      ignoredProgrammaticSeekTimeRef.current = authoritativeRoom.currentTime;
+      pendingSeekTimeRef.current = undefined;
+      latestRequestedProgrammaticSeekRef.current = pushRecentSeek(
+        ignoredProgrammaticSeekTimesRef,
+        authoritativeRoom.currentTime
+      );
+      latestSeekIntentRef.current = latestRequestedProgrammaticSeekRef.current;
       video.currentTime = authoritativeRoom.currentTime;
       setCurrentTime(authoritativeRoom.currentTime);
     } else {
+      pendingSeekTimeRef.current = undefined;
       setCurrentTime(video.currentTime);
     }
 
@@ -3452,7 +3546,11 @@ export function LocalFileRoomPlayer({
       playableBufferedUntil
     });
 
-    ignoredProgrammaticSeekTimeRef.current = pendingPlaybackRestore.time;
+    latestRequestedProgrammaticSeekRef.current = pushRecentSeek(
+      ignoredProgrammaticSeekTimesRef,
+      pendingPlaybackRestore.time
+    );
+    latestSeekIntentRef.current = latestRequestedProgrammaticSeekRef.current;
     video.currentTime = pendingPlaybackRestore.time;
     setCurrentTime(pendingPlaybackRestore.time);
 
@@ -3733,9 +3831,100 @@ export function LocalFileRoomPlayer({
     return contiguousBytesRef.current >= getProgressiveStartThresholdBytes();
   }
 
+  function applyImmediateSeek(video: HTMLVideoElement, nextTime: number) {
+    if (!Number.isFinite(nextTime) || nextTime < 0) {
+      return;
+    }
+
+    const bufferedUntilTime = getPlayableBufferedUntil(video);
+
+    if (!isHost) {
+      pendingLocalSeekAckRef.current = {
+        time: nextTime,
+        issuedAt: Date.now()
+      };
+    }
+
+    latestRequestedLocalSeekRef.current = pushRecentSeek(dispatchedLocalSeekTimesRef, nextTime);
+    latestSeekIntentRef.current = latestRequestedLocalSeekRef.current;
+    pendingSeekTimeRef.current = undefined;
+    video.currentTime = nextTime;
+    setCurrentTime(nextTime);
+
+    if (isHost) {
+      onSeek(nextTime);
+      return;
+    }
+
+    if (bufferedUntilTime !== undefined && nextTime <= bufferedUntilTime - SEEK_RESUME_PADDING_SECONDS) {
+      onSeek(nextTime);
+      return;
+    }
+
+    pendingSeekTimeRef.current = nextTime;
+    suppressNextLocalPauseEventRef.current = true;
+    forwardNextLocalPauseEventRef.current = false;
+    video.pause();
+    onSeek(nextTime);
+    requestNextRange("seek");
+  }
+
+  function requestLocalPlayback(video: HTMLVideoElement) {
+    const bufferedUntilTime = isHost ? Number.POSITIVE_INFINITY : getPlayableBufferedUntil(video);
+
+    if (!isHost && !hasCurrentPlayableData(video)) {
+      pendingSeekTimeRef.current = video.currentTime;
+      updateLocalMessage(`Buffering at ${formatTime(video.currentTime)}`);
+      publishTransferState(
+        buildTransferState("buffering", {
+          pendingSeekTime: video.currentTime,
+          message: `Buffering at ${formatTime(video.currentTime)}`
+        })
+      );
+      requestNextRange("seek");
+      return;
+    }
+
+    if (bufferedUntilTime !== undefined && video.currentTime >= bufferedUntilTime - 0.25) {
+      suppressNextLocalPauseEventRef.current = true;
+      forwardNextLocalPauseEventRef.current = false;
+      video.pause();
+      pendingSeekTimeRef.current = video.currentTime;
+      requestNextRange("seek");
+      return;
+    }
+
+    pendingSeekTimeRef.current = undefined;
+    pendingLocalPauseAckRef.current = null;
+    pendingLocalPlayAckRef.current = Date.now();
+    skipNextLocalPlayEventRef.current = true;
+    setIsPlaying(true);
+    onPlay(video.currentTime);
+    void video.play().catch(() => {
+      skipNextLocalPlayEventRef.current = false;
+    });
+  }
+
   function shouldDeferAuthoritativePlayback(video: HTMLVideoElement, authoritativeRoom: RoomState) {
     if (isHost) {
       return false;
+    }
+
+    const pendingLocalPlayAck = pendingLocalPlayAckRef.current;
+
+    if (pendingLocalPlayAck !== null) {
+      if (authoritativeRoom.playbackState === "playing") {
+        pendingLocalPlayAckRef.current = null;
+      } else if (Date.now() - pendingLocalPlayAck <= LOCAL_SEEK_ACK_GRACE_MS) {
+        debugLog(debugRole, "deferring stale authoritative playback update during local play", {
+          localCurrentTime: video.currentTime,
+          authoritativeTime: authoritativeRoom.currentTime,
+          lastEventId: authoritativeRoom.lastEventId
+        });
+        return true;
+      } else {
+        pendingLocalPlayAckRef.current = null;
+      }
     }
 
     const pendingLocalPauseAck = pendingLocalPauseAckRef.current;
@@ -3779,6 +3968,61 @@ export function LocalFileRoomPlayer({
     });
     return true;
   }
+
+  function isStaleSeekCompletion(targetTime: number, requestIssuedAt?: number) {
+    const latestSeekIntent = latestSeekIntentRef.current;
+
+    if (!latestSeekIntent || requestIssuedAt === undefined) {
+      return false;
+    }
+
+    if (latestSeekIntent.issuedAt <= requestIssuedAt) {
+      return false;
+    }
+
+    if (Math.abs(latestSeekIntent.time - targetTime) <= 0.5) {
+      return false;
+    }
+
+    debugLog(debugRole, "ignoring stale seek range completion", {
+      completedSeekTime: targetTime,
+      requestIssuedAt,
+      latestSeekIntentTime: latestSeekIntent.time,
+      latestSeekIntentIssuedAt: latestSeekIntent.issuedAt
+    });
+    return true;
+  }
+}
+
+function pushRecentSeek(queueRef: RefObject<Array<{ time: number; issuedAt: number }>>, time: number) {
+  const nextEntry = {
+    time,
+    issuedAt: Date.now()
+  };
+  const recentEntries = queueRef.current.filter((entry) => nextEntry.issuedAt - entry.issuedAt <= LOCAL_SEEK_ACK_GRACE_MS);
+  queueRef.current = [...recentEntries, nextEntry].slice(-8);
+  return nextEntry;
+}
+
+function consumeMatchingRecentSeek(
+  queueRef: RefObject<Array<{ time: number; issuedAt: number }>>,
+  time: number,
+  toleranceSeconds: number
+) {
+  const now = Date.now();
+  const matchIndex = queueRef.current.findIndex(
+    (entry) =>
+      now - entry.issuedAt <= LOCAL_SEEK_ACK_GRACE_MS &&
+      Math.abs(entry.time - time) <= toleranceSeconds
+  );
+
+  if (matchIndex === -1) {
+    queueRef.current = queueRef.current.filter((entry) => now - entry.issuedAt <= LOCAL_SEEK_ACK_GRACE_MS);
+    return null;
+  }
+
+  const [matchedEntry] = queueRef.current.splice(matchIndex, 1);
+  return matchedEntry ?? null;
 }
 
 function debugLog(role: "host" | "guest", message: string, details?: Record<string, unknown>) {
