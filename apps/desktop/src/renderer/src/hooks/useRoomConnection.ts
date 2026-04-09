@@ -86,6 +86,8 @@ export function useRoomConnection() {
   const socketRef = useRef<WebSocket | null>(null);
   const pendingMessagesRef = useRef<ClientEnvelope[]>([]);
   const displayNameRef = useRef(displayName);
+  const roomRef = useRef<RoomState | null>(null);
+  const pendingLeaveRoomIdRef = useRef<string | null>(null);
 
   const pushDebugEntry = useCallback((entry: Omit<DebugEntry, "id" | "timestamp">) => {
     const nextEntry: DebugEntry = {
@@ -114,11 +116,14 @@ export function useRoomConnection() {
     switch (event.type) {
       case "room_created":
       case "room_joined":
+        roomRef.current = event.payload.room;
+        pendingLeaveRoomIdRef.current = null;
         setSelfId(event.payload.selfId);
         setRoom(event.payload.room);
         setLastActionLabel(`Joined room ${event.payload.room.roomId}`);
         return;
       case "presence_updated":
+        roomRef.current = event.payload.room;
         setRoom(event.payload.room);
         setError(null);
         setLastActionLabel(`${event.payload.room.participants.length} participant(s) connected`);
@@ -133,10 +138,13 @@ export function useRoomConnection() {
             return current;
           }
 
-          return {
+          const nextRoom = {
             ...current,
             chatMessages: [...current.chatMessages, event.payload.message]
           };
+
+          roomRef.current = nextRoom;
+          return nextRoom;
         });
         setLastActionLabel(`New chat message from ${event.payload.message.senderDisplayName ?? "room"}`);
         return;
@@ -144,9 +152,11 @@ export function useRoomConnection() {
       case "local_file_ready":
       case "local_file_buffering":
       case "subtitle_track_updated":
+        roomRef.current = event.payload.room;
         setRoom(event.payload.room);
         return;
       case "sync_snapshot":
+        roomRef.current = event.payload.room;
         setRoom(event.payload.room);
         setRemoteCommand({
           kind: "sync",
@@ -157,6 +167,7 @@ export function useRoomConnection() {
         setLastActionLabel("Synced with room state");
         return;
       case "player_state_changed":
+        roomRef.current = event.payload.room;
         setRoom(event.payload.room);
         setRemoteCommand({
           kind: "event",
@@ -189,13 +200,20 @@ export function useRoomConnection() {
         });
         return;
       case "host_disconnected":
+        roomRef.current = null;
+        pendingLeaveRoomIdRef.current = event.payload.roomId;
         setError(event.payload.message);
         setRoom(null);
         setPeerSignal(null);
         return;
-      case "server_error":
+      case "server_error": {
+        if (event.payload.message === "Room not found." && !roomRef.current && pendingLeaveRoomIdRef.current) {
+          return;
+        }
+
         setError(event.payload.message);
         return;
+      }
     }
   }, [pushDebugEntry]);
 
@@ -307,154 +325,175 @@ export function useRoomConnection() {
   );
 
   const leaveRoom = useCallback(() => {
-    if (!room) {
+    const currentRoom = roomRef.current;
+
+    if (!currentRoom) {
       return;
     }
 
+    pendingLeaveRoomIdRef.current = currentRoom.roomId;
+    roomRef.current = null;
+    setError(null);
     send({
       type: "leave_room",
       payload: {
-        roomId: room.roomId
+        roomId: currentRoom.roomId
       }
     });
     setRoom(null);
     setPeerSignal(null);
     setRemoteCommand(null);
-  }, [room, send]);
+  }, [send]);
 
   const requestSync = useCallback(() => {
-    if (!room) {
+    const currentRoom = roomRef.current;
+
+    if (!currentRoom) {
       return;
     }
 
     send({
       type: "request_sync",
       payload: {
-        roomId: room.roomId
+        roomId: currentRoom.roomId
       }
     });
-  }, [room, send]);
+  }, [send]);
 
   const sendChatMessage = useCallback(
     (text: string) => {
-      if (!room) {
+      const currentRoom = roomRef.current;
+
+      if (!currentRoom) {
         return;
       }
 
       send({
         type: "send_chat_message",
         payload: {
-          roomId: room.roomId,
+          roomId: currentRoom.roomId,
           text
         }
       });
     },
-    [room, send]
+    [send]
   );
 
   const sendPlaybackAction = useCallback(
     (type: "player_play" | "player_pause" | "player_seek", currentTime: number) => {
-      if (!room) {
+      const activeRoom = roomRef.current;
+
+      if (!activeRoom) {
         return;
       }
 
       send({
         type,
         payload: {
-          roomId: room.roomId,
+          roomId: activeRoom.roomId,
           currentTime
         }
       });
     },
-    [room, send]
+    [send]
   );
 
   const sendPeerOffer = useCallback(
     (targetParticipantId: string, sdp: RTCSessionDescriptionInit) => {
-      if (!room) {
+      const currentRoom = roomRef.current;
+
+      if (!currentRoom) {
         return;
       }
 
       send({
         type: "peer_offer",
         payload: {
-          roomId: room.roomId,
+          roomId: currentRoom.roomId,
           targetParticipantId,
           sdp
         }
       });
     },
-    [room, send]
+    [send]
   );
 
   const sendPeerAnswer = useCallback(
     (targetParticipantId: string, sdp: RTCSessionDescriptionInit) => {
-      if (!room) {
+      const currentRoom = roomRef.current;
+
+      if (!currentRoom) {
         return;
       }
 
       send({
         type: "peer_answer",
         payload: {
-          roomId: room.roomId,
+          roomId: currentRoom.roomId,
           targetParticipantId,
           sdp
         }
       });
     },
-    [room, send]
+    [send]
   );
 
   const sendPeerIceCandidate = useCallback(
     (targetParticipantId: string, candidate: RTCIceCandidateInit) => {
-      if (!room) {
+      const currentRoom = roomRef.current;
+
+      if (!currentRoom) {
         return;
       }
 
       send({
         type: "peer_ice_candidate",
         payload: {
-          roomId: room.roomId,
+          roomId: currentRoom.roomId,
           targetParticipantId,
           candidate
         }
       });
     },
-    [room, send]
+    [send]
   );
 
   const updateTransferState = useCallback(
     (transferState: TransferState) => {
-      if (!room) {
+      const currentRoom = roomRef.current;
+
+      if (!currentRoom) {
         return;
       }
 
       send({
         type: "peer_transfer_state",
         payload: {
-          roomId: room.roomId,
+          roomId: currentRoom.roomId,
           transferState
         }
       });
     },
-    [room, send]
+    [send]
   );
 
   const updateSubtitleTrack = useCallback(
     (subtitleTrack: SubtitleTrack) => {
-      if (!room) {
+      const currentRoom = roomRef.current;
+
+      if (!currentRoom) {
         return;
       }
 
       send({
         type: "update_subtitle_track",
         payload: {
-          roomId: room.roomId,
+          roomId: currentRoom.roomId,
           subtitleTrack
         }
       });
     },
-    [room, send]
+    [send]
   );
 
   const participants = useMemo<Participant[]>(() => room?.participants ?? [], [room]);
