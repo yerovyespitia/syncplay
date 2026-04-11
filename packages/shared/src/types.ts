@@ -144,6 +144,7 @@ export type ClientEvent =
       type: "request_sync";
       payload: {
         roomId: string;
+        currentTime?: number;
       };
     }
   | PlaybackClientEvent

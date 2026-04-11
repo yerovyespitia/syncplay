@@ -149,6 +149,31 @@ export class RoomManager {
     return this.rooms.get(normalizeRoomId(roomId))?.state ?? null;
   }
 
+  requestSync(roomId: string, currentTime?: number) {
+    const record = this.rooms.get(normalizeRoomId(roomId));
+
+    if (!record) {
+      return null;
+    }
+
+    if (currentTime === undefined) {
+      record.state = advanceRoomPlayback(record.state);
+      return record.state;
+    }
+
+    const nextState = advanceRoomPlayback(record.state);
+
+    record.state = {
+      ...nextState,
+      currentTime: clampPlaybackTime(currentTime),
+      updatedAt: Date.now(),
+      lastEventId: nextState.lastEventId + 1,
+      participants: Array.from(record.participants.values())
+    };
+
+    return record.state;
+  }
+
   addChatMessage(
     roomId: string,
     message: Omit<ChatMessage, "id" | "roomId" | "createdAt">

@@ -62,6 +62,19 @@ describe("RoomManager", () => {
     expect(result?.room.lastEventId).toBe(1);
   });
 
+  test("resyncs the room to the requesting participant time", () => {
+    const manager = new RoomManager();
+    const created = manager.createRoom(localFileSource, participantA);
+    const joined = manager.joinRoom(created.room.roomId, participantB);
+
+    expect(joined.ok).toBeTrue();
+
+    const result = manager.requestSync(created.room.roomId, 31.25);
+
+    expect(result?.currentTime).toBe(31.25);
+    expect(result?.lastEventId).toBe(2);
+  });
+
   test("deletes empty rooms when everybody leaves", () => {
     const manager = new RoomManager();
     const created = manager.createRoom(youtubeSource, participantA);

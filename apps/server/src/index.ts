@@ -207,17 +207,18 @@ export function createSyncPlayServer(port = Number(process.env.PORT ?? 8787)) {
       }
 
       case "request_sync": {
-        const room = roomManager.getRoom(event.payload.roomId);
+        const room = roomManager.requestSync(event.payload.roomId, event.payload.currentTime);
 
         if (!room) {
           sendError(ws, "Room not found.");
           return;
         }
 
-        send(ws, {
+        broadcast(room.roomId, {
           type: "sync_snapshot",
           payload: {
-            room
+            room,
+            actorId: ws.data.participantId
           }
         });
 

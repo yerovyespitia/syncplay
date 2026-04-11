@@ -229,6 +229,14 @@ export default function App() {
   const shouldShowMagnetSupportWarning = sourceOption === "torrent_magnet" && !torrentSessionProvider.isSupported;
   const shouldBlockSafariMagnetFlow = sourceOption === "torrent_magnet" && isSafariBrowser;
 
+  function handleRequestSync() {
+    const localVideo = document.querySelector("video");
+    const currentTime =
+      localVideo && Number.isFinite(localVideo.currentTime) ? localVideo.currentTime : undefined;
+
+    requestSync(currentTime);
+  }
+
   const parsedVideo = useMemo(() => parseYouTubeUrl(videoUrl), [videoUrl]);
   const canCreateRoom =
     sourceOption === "youtube"
@@ -848,7 +856,7 @@ export default function App() {
           onLeave={() => {
             void handleLeaveRoom();
           }}
-          onRequestSync={requestSync}
+          onRequestSync={handleRequestSync}
           onSendChatMessage={sendChatMessage}
           onPlay={sendPlay}
           onPause={sendPause}

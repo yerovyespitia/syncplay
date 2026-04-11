@@ -345,7 +345,7 @@ export function useRoomConnection() {
     setRemoteCommand(null);
   }, [send]);
 
-  const requestSync = useCallback(() => {
+  const requestSync = useCallback((currentTime?: number) => {
     const currentRoom = roomRef.current;
 
     if (!currentRoom) {
@@ -355,7 +355,8 @@ export function useRoomConnection() {
     send({
       type: "request_sync",
       payload: {
-        roomId: currentRoom.roomId
+        roomId: currentRoom.roomId,
+        currentTime
       }
     });
   }, [send]);

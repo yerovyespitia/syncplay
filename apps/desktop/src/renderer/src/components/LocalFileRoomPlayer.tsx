@@ -958,7 +958,9 @@ export function LocalFileRoomPlayer({
       return;
     }
 
-    applyAuthoritativeState(video, remoteCommand.room);
+    applyAuthoritativeState(video, remoteCommand.room, {
+      forceChaseBufferedTarget: remoteCommand.kind === "sync" && remoteCommand.actorId !== selfId
+    });
     lastAppliedEventIdRef.current = remoteCommand.room.lastEventId;
   }, [mediaUrl, remoteCommand, selfId]);
 
@@ -3446,7 +3448,11 @@ export function LocalFileRoomPlayer({
     </div>
   );
 
-  function applyAuthoritativeState(video: HTMLVideoElement, authoritativeRoom: RoomState) {
+  function applyAuthoritativeState(
+    video: HTMLVideoElement,
+    authoritativeRoom: RoomState,
+    options: { forceChaseBufferedTarget?: boolean } = {}
+  ) {
     suppressEventsRef.current = true;
     setIsPlaying(authoritativeRoom.playbackState === "playing");
     debugLog(debugRole, "applyAuthoritativeState", {
@@ -3470,7 +3476,8 @@ export function LocalFileRoomPlayer({
       !canSeekThroughMediaSource &&
       ((!hasCurrentPlayableData(video) && authoritativeRoom.playbackState === "playing") ||
         (playableBufferedUntil !== undefined && authoritativeRoom.currentTime > playableBufferedUntil - 0.25));
-    const shouldChaseAuthoritativeTime = shouldChaseAuthoritativeBufferTarget(video, authoritativeRoom.currentTime);
+    const shouldChaseAuthoritativeTime =
+      options.forceChaseBufferedTarget || shouldChaseAuthoritativeBufferTarget(video, authoritativeRoom.currentTime);
 
     if (shouldAwaitBufferedPlayback) {
       pendingSeekTimeRef.current = shouldChaseAuthoritativeTime ? authoritativeRoom.currentTime : undefined;
