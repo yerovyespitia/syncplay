@@ -1224,6 +1224,28 @@ select.text-input::-ms-expand {
   color: rgba(250, 250, 250, 0.7);
 }
 
+.local-player-download-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: rgba(250, 250, 250, 0.58);
+  font-size: 0.78rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.local-player-download-status svg {
+  width: 15px;
+  height: 15px;
+  flex: none;
+}
+
+.local-player-download-status--complete {
+  color: #22c55e;
+}
+
 .local-player-meta {
   display: flex;
   flex-wrap: wrap;

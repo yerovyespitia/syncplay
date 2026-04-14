@@ -429,6 +429,17 @@ function VolumeMutedIcon() {
   );
 }
 
+function DownloadIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path
+        fill="currentColor"
+        d="M11.25 4.75a.75.75 0 0 1 1.5 0v8.69l2.22-2.22a.75.75 0 1 1 1.06 1.06l-3.5 3.5a.75.75 0 0 1-1.06 0l-3.5-3.5a.75.75 0 1 1 1.06-1.06l2.22 2.22V4.75ZM5.75 17a.75.75 0 0 1 .75.75v.75h11v-.75a.75.75 0 0 1 1.5 0v1.5a.75.75 0 0 1-.75.75H5.75a.75.75 0 0 1-.75-.75v-1.5a.75.75 0 0 1 .75-.75Z"
+      />
+    </svg>
+  );
+}
+
 function ExpandIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
@@ -571,6 +582,12 @@ export function LocalFileRoomPlayer({
     safeDuration > 0 ? Math.min(safeDuration, Math.max(0, getPlayableBufferedUntil(videoRef.current) ?? 0)) : 0;
   const bufferedPercent = safeDuration > 0 ? Math.min(100, (playableBufferedUntil / safeDuration) * 100) : 0;
   const volumePercent = Math.min(100, Math.max(0, (isMuted ? 0 : volume) * 100));
+  const transferProgress = room.transferState ? Math.min(1, Math.max(0, room.transferState.progress)) : 0;
+  const isTransferComplete = transferProgress >= 1;
+  const showTransferStatus = Boolean(room.transferState && !showLoadingOverlay && room.participants.length > 1);
+  const transferPercent = isTransferComplete
+    ? 100
+    : Math.min(99, Math.max(0, Math.floor(transferProgress * 100)));
 
   function reportLocalDebug(message: string, details?: Record<string, unknown>) {
     debugLog(debugRole, message, details);
@@ -3353,6 +3370,20 @@ export function LocalFileRoomPlayer({
                     } as React.CSSProperties
                   }
                 />
+                {showTransferStatus ? (
+                  <span
+                    className={`local-player-download-status ${
+                      isTransferComplete ? "local-player-download-status--complete" : ""
+                    }`}
+                    role="status"
+                    aria-live="polite"
+                    aria-label={`Downloading video ${transferPercent}%`}
+                    title={`Downloading video ${transferPercent}%`}
+                  >
+                    <DownloadIcon />
+                    {transferPercent}%
+                  </span>
+                ) : null}
               </div>
 
               <div className="local-player-time-block">
