@@ -460,6 +460,49 @@ function ClosedCaptionsIcon() {
   );
 }
 
+function ReplaceSubtitlesIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path
+        fill="currentColor"
+        d="M7 5.5h7.35l-1.57-1.57a.75.75 0 0 1 1.06-1.06l2.85 2.85a.75.75 0 0 1 0 1.06l-2.85 2.85a.75.75 0 0 1-1.06-1.06L14.35 7H7a2.5 2.5 0 0 0-2.5 2.5v.75a.75.75 0 0 1-1.5 0V9.5A4 4 0 0 1 7 5.5Zm10.25 2.75A3.75 3.75 0 0 1 21 12v2.5a4 4 0 0 1-4 4H9.65l1.57 1.57a.75.75 0 1 1-1.06 1.06l-2.85-2.85a.75.75 0 0 1 0-1.06l2.85-2.85a.75.75 0 1 1 1.06 1.06L9.65 17H17a2.5 2.5 0 0 0 2.5-2.5V12a2.25 2.25 0 0 0-2.25-2.25h-.25a.75.75 0 0 1 0-1.5h.25Z"
+      />
+    </svg>
+  );
+}
+
+function ToggleSubtitlesIcon({ isHiddenAction }: { isHiddenAction: boolean }) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <rect x="2.75" y="5.75" width="18.5" height="12.5" rx="2.25" fill="none" stroke="currentColor" strokeWidth="1.3" />
+      <text
+        x="12.75"
+        y="12"
+        textAnchor="middle"
+        dominantBaseline="central"
+        fill="currentColor"
+        stroke="currentColor"
+        strokeWidth="0.35"
+        fontSize="9"
+        fontWeight="900"
+        fontFamily="sans-serif"
+        letterSpacing="1.2"
+      >
+        CC
+      </text>
+      {isHiddenAction ? (
+        <path
+          d="M4.5 19.5 19.5 4.5"
+          fill="none"
+          stroke="currentColor"
+          strokeLinecap="round"
+          strokeWidth="1.8"
+        />
+      ) : null}
+    </svg>
+  );
+}
+
 function TheaterIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
@@ -3427,17 +3470,19 @@ export function LocalFileRoomPlayer({
                           className="local-player-subtitle-menu-item"
                           type="button"
                           role="menuitem"
-                          onClick={handleToggleCaptions}
+                          onClick={handleReplaceSubtitles}
                         >
-                          {isCaptionsEnabled ? "Hide subtitles" : "Show subtitles"}
+                          <ReplaceSubtitlesIcon />
+                          <span>Replace subtitles</span>
                         </button>
                         <button
                           className="local-player-subtitle-menu-item"
                           type="button"
                           role="menuitem"
-                          onClick={handleReplaceSubtitles}
+                          onClick={handleToggleCaptions}
                         >
-                          Replace subtitles
+                          <ToggleSubtitlesIcon isHiddenAction={isCaptionsEnabled} />
+                          <span>{isCaptionsEnabled ? "Hide subtitles" : "Show subtitles"}</span>
                         </button>
                       </div>
                     ) : null}
