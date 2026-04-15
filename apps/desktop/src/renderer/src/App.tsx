@@ -228,6 +228,7 @@ export default function App() {
   } = useRoomConnection();
   const shouldShowMagnetSupportWarning = sourceOption === "torrent_magnet" && !torrentSessionProvider.isSupported;
   const shouldBlockSafariMagnetFlow = sourceOption === "torrent_magnet" && isSafariBrowser;
+  const hasResolvedMagnet = Boolean(torrentSession && torrentSession.phase !== "failed");
 
   function handleRequestSync() {
     const localVideo = document.querySelector("video");
@@ -746,9 +747,9 @@ export default function App() {
                       className="secondary-button"
                       type="button"
                       onClick={handleResolveMagnet}
-                      disabled={isResolvingMagnet || shouldBlockSafariMagnetFlow}
+                      disabled={isResolvingMagnet || shouldBlockSafariMagnetFlow || hasResolvedMagnet}
                     >
-                      {isResolvingMagnet ? "Resolving..." : "Resolve magnet"}
+                      {isResolvingMagnet ? "Resolving..." : hasResolvedMagnet ? "Magnet resolved" : "Resolve magnet"}
                     </button>
                     <span className="helper-text">{renderTorrentStatus()}</span>
                   </div>

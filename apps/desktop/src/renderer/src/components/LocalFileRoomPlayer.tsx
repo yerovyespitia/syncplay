@@ -637,8 +637,7 @@ export function LocalFileRoomPlayer({
   const isTransferComplete = transferProgress >= 1;
   const showTransferStatus =
     !showLoadingOverlay &&
-    room.participants.length > 1 &&
-    (hostMagnetDownloadProgress !== undefined || (!isHost && Boolean(room.transferState)));
+    (hostMagnetDownloadProgress !== undefined || (room.participants.length > 1 && !isHost && Boolean(room.transferState)));
   const transferPercent = isTransferComplete
     ? 100
     : Math.min(99, Math.max(0, Math.floor(transferProgress * 100)));
