@@ -55,6 +55,7 @@ type PeerSignal =
 interface RoomPanelProps {
   room: RoomState;
   localFile: SelectedTorrentFileSource | File | null;
+  hostDownloadProgress?: number;
   selfId: string | null;
   remoteCommand: RemotePlaybackCommand | null;
   debugEntries: DebugEntry[];
@@ -153,6 +154,7 @@ function formatTransferProgressLabel(transferState: TransferState) {
 export function RoomPanel({
   room,
   localFile,
+  hostDownloadProgress,
   selfId,
   remoteCommand,
   debugEntries,
@@ -342,6 +344,7 @@ export function RoomPanel({
               room={room as RoomState & { mediaSource: HostedFileMediaSource }}
               selfId={selfId}
               localFile={localFile}
+              hostDownloadProgress={hostDownloadProgress}
               isTheaterMode={isTheaterMode}
               showDebugInfo={showDebugLogs}
               remoteCommand={remoteCommand}

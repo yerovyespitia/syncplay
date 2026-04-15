@@ -57,6 +57,7 @@ interface LocalFileRoomPlayerProps {
   room: RoomState & { mediaSource: HostedFileMediaSource };
   selfId: string | null;
   localFile: SelectedTorrentFileSource | File | null;
+  hostDownloadProgress?: number;
   isTheaterMode: boolean;
   showDebugInfo?: boolean;
   showLoadingOverlay?: boolean;
@@ -518,6 +519,7 @@ export function LocalFileRoomPlayer({
   room,
   selfId,
   localFile,
+  hostDownloadProgress,
   isTheaterMode,
   showDebugInfo = false,
   showLoadingOverlay = false,
@@ -625,9 +627,18 @@ export function LocalFileRoomPlayer({
     safeDuration > 0 ? Math.min(safeDuration, Math.max(0, getPlayableBufferedUntil(videoRef.current) ?? 0)) : 0;
   const bufferedPercent = safeDuration > 0 ? Math.min(100, (playableBufferedUntil / safeDuration) * 100) : 0;
   const volumePercent = Math.min(100, Math.max(0, (isMuted ? 0 : volume) * 100));
-  const transferProgress = room.transferState ? Math.min(1, Math.max(0, room.transferState.progress)) : 0;
+  const hostMagnetDownloadProgress =
+    room.mediaSource.type === "torrent_magnet" && isHost && hostDownloadProgress !== undefined
+      ? Math.min(1, Math.max(0, hostDownloadProgress))
+      : undefined;
+  const transferProgress =
+    hostMagnetDownloadProgress ??
+    (room.transferState ? Math.min(1, Math.max(0, room.transferState.progress)) : 0);
   const isTransferComplete = transferProgress >= 1;
-  const showTransferStatus = Boolean(room.transferState && !showLoadingOverlay && room.participants.length > 1);
+  const showTransferStatus =
+    !showLoadingOverlay &&
+    room.participants.length > 1 &&
+    (hostMagnetDownloadProgress !== undefined || (!isHost && Boolean(room.transferState)));
   const transferPercent = isTransferComplete
     ? 100
     : Math.min(99, Math.max(0, Math.floor(transferProgress * 100)));

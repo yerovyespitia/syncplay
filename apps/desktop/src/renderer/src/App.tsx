@@ -848,6 +848,11 @@ export default function App() {
         <RoomPanel
           room={room}
           localFile={selectedPlaybackFile}
+          hostDownloadProgress={
+            room.mediaSource.type === "torrent_magnet" && room.hostParticipantId === selfId
+              ? torrentSession?.progress
+              : undefined
+          }
           selfId={selfId}
           remoteCommand={remoteCommand}
           debugEntries={debugEntries}
