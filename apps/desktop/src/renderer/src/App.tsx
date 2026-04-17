@@ -561,7 +561,21 @@ export default function App() {
     }
 
     if (torrentSession.selectedFileIndex !== undefined) {
-      return `Torrent ready. ${Math.round(torrentSession.progress * 100)}% downloaded from ${torrentSession.peerCount} peer(s).`;
+      const downloadPercent = Math.round(torrentSession.progress * 100);
+      const downloadPercentClassName =
+        downloadPercent === 0
+          ? "torrent-download-percent--empty"
+          : downloadPercent < 50
+            ? "torrent-download-percent--partial"
+            : "torrent-download-percent--ready";
+      const peerCountClassName = torrentSession.peerCount === 0 ? "torrent-peer-count--empty" : "torrent-peer-count--active";
+
+      return (
+        <>
+          Torrent ready. <span className={downloadPercentClassName}>{downloadPercent}%</span> downloaded from{" "}
+          <span className={peerCountClassName}>{torrentSession.peerCount}</span> peer(s).
+        </>
+      );
     }
 
     return "Fetching torrent metadata.";

@@ -203,6 +203,26 @@ button:disabled {
   font-size: 0.83rem;
 }
 
+.torrent-peer-count--active {
+  color: #22c55e;
+}
+
+.torrent-peer-count--empty {
+  color: #ef4444;
+}
+
+.torrent-download-percent--ready {
+  color: #22c55e;
+}
+
+.torrent-download-percent--partial {
+  color: #f97316;
+}
+
+.torrent-download-percent--empty {
+  color: #ef4444;
+}
+
 .source-badge {
   display: inline-flex;
   align-items: center;
