@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import type { DesktopApi, PickedLocalFile, TorrentSessionSummary } from "@syncplay/shared";
+import type { DesktopApi, PickedLocalFile, TorrentMagnetMediaSource, TorrentSessionSummary } from "@syncplay/shared";
 import { parseYouTubeUrl } from "@syncplay/shared";
 
 import appleDarkIcon from "./assets/apple-dark.svg";
@@ -81,6 +81,14 @@ function detectSafariBrowser() {
   const isExcludedBrowser = /Chrome|Chromium|CriOS|FxiOS|Firefox|EdgiOS|Edg|OPiOS|OPR|Android/i.test(userAgent);
 
   return isAppleVendor && isSafariEngine && !isExcludedBrowser;
+}
+
+function findMatchingTorrentFile(session: TorrentSessionSummary, mediaSource: TorrentMagnetMediaSource) {
+  return (
+    session.files.find((file) => file.name === mediaSource.fileName && file.size === mediaSource.fileSize) ??
+    session.files.find((file) => file.path.endsWith(mediaSource.fileName) && file.size === mediaSource.fileSize) ??
+    null
+  );
 }
 
 function formatConnectionLabel(status: string) {
@@ -200,6 +208,7 @@ export default function App() {
   const [localError, setLocalError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const activeTorrentSessionIdRef = useRef<string | null>(null);
+  const preparingGuestTorrentRoomIdRef = useRef<string | null>(null);
   const {
     connectionStatus,
     room,
@@ -239,6 +248,17 @@ export default function App() {
   }
 
   const parsedVideo = useMemo(() => parseYouTubeUrl(videoUrl), [videoUrl]);
+  const selectedPlaybackFileForRoom = useMemo(() => {
+    if (!room || room.mediaSource.type === "youtube" || !selectedPlaybackFile) {
+      return null;
+    }
+
+    if (selectedPlaybackFile instanceof File) {
+      return room.mediaSource.type === "local_file" ? selectedPlaybackFile : null;
+    }
+
+    return selectedPlaybackFile.mediaId === room.mediaSource.mediaId ? selectedPlaybackFile : null;
+  }, [room, selectedPlaybackFile]);
   const canCreateRoom =
     sourceOption === "youtube"
       ? Boolean(parsedVideo)
@@ -353,7 +373,7 @@ export default function App() {
 
     const intervalId = window.setInterval(() => {
       void torrentSessionProvider.getTorrentSessionStatus(torrentSession.sessionId).then((nextStatus) => {
-        if (nextStatus) {
+        if (nextStatus && activeTorrentSessionIdRef.current === torrentSession.sessionId) {
           setTorrentSession(nextStatus);
         }
       });
@@ -363,6 +383,120 @@ export default function App() {
       window.clearInterval(intervalId);
     };
   }, [torrentSession, torrentSessionProvider]);
+
+  useEffect(() => {
+    if (
+      room &&
+      room.mediaSource.type !== "youtube" &&
+      selectedPlaybackFile &&
+      !(selectedPlaybackFile instanceof File) &&
+      selectedPlaybackFile.mediaId !== room.mediaSource.mediaId
+    ) {
+      setSelectedLocalFile(null);
+      setSelectedPlaybackFile(null);
+    }
+  }, [room, selectedPlaybackFile]);
+
+  useEffect(() => {
+    if (!room || room.mediaSource.type !== "torrent_magnet" || room.hostParticipantId === selfId) {
+      preparingGuestTorrentRoomIdRef.current = null;
+      return;
+    }
+
+    if (
+      selectedPlaybackFile &&
+      !(selectedPlaybackFile instanceof File) &&
+      selectedPlaybackFile.type === "torrent_magnet" &&
+      selectedPlaybackFile.mediaId === room.mediaSource.mediaId
+    ) {
+      return;
+    }
+
+    if (preparingGuestTorrentRoomIdRef.current === room.roomId) {
+      return;
+    }
+
+    let isCancelled = false;
+
+    async function prepareGuestTorrentPlayback() {
+      if (!room || room.mediaSource.type !== "torrent_magnet") {
+        return;
+      }
+
+      preparingGuestTorrentRoomIdRef.current = room.roomId;
+      setIsResolvingMagnet(true);
+      setLocalError(null);
+
+      try {
+        await disposeActiveTorrentSession();
+        const nextSession = await torrentSessionProvider.resolveMagnetLink(room.mediaSource.magnetUri);
+
+        if (isCancelled) {
+          if (nextSession.sessionId) {
+            await torrentSessionProvider.disposeTorrentSession(nextSession.sessionId);
+          }
+          return;
+        }
+
+        setTorrentSession(nextSession);
+        activeTorrentSessionIdRef.current = nextSession.sessionId || null;
+
+        if (nextSession.phase === "failed") {
+          setLocalError(nextSession.message ?? "Could not resolve magnet link.");
+          return;
+        }
+
+        const matchingFile = findMatchingTorrentFile(nextSession, room.mediaSource);
+
+        if (!matchingFile) {
+          setLocalError("Could not find the shared video inside the torrent.");
+          return;
+        }
+
+        const pickedFile = await torrentSessionProvider.selectTorrentFile(nextSession.sessionId, matchingFile.index);
+
+        if (isCancelled) {
+          if (nextSession.sessionId) {
+            await torrentSessionProvider.disposeTorrentSession(nextSession.sessionId);
+          }
+          return;
+        }
+
+        const roomPickedFile = {
+          ...pickedFile,
+          mediaId: room.mediaSource.mediaId
+        };
+
+        setSelectedLocalFile(roomPickedFile);
+        setSelectedPlaybackFile(roomPickedFile);
+
+        const latestStatus = await torrentSessionProvider.getTorrentSessionStatus(nextSession.sessionId);
+        if (!isCancelled && latestStatus) {
+          setTorrentSession(latestStatus);
+        }
+      } catch (resolveError) {
+        if (!isCancelled) {
+          preparingGuestTorrentRoomIdRef.current = null;
+          setLocalError(resolveError instanceof Error ? resolveError.message : "Could not prepare magnet playback.");
+        }
+      } finally {
+        if (!isCancelled) {
+          setIsResolvingMagnet(false);
+        }
+      }
+    }
+
+    void prepareGuestTorrentPlayback();
+
+    const preparingRoomId = room.roomId;
+
+    return () => {
+      isCancelled = true;
+      if (preparingGuestTorrentRoomIdRef.current === preparingRoomId) {
+        preparingGuestTorrentRoomIdRef.current = null;
+      }
+    };
+  }, [room?.roomId, room?.mediaSource, room?.hostParticipantId, selfId, selectedPlaybackFile, torrentSessionProvider]);
 
   useEffect(() => {
     return () => {
@@ -861,10 +995,11 @@ export default function App() {
         </>
       ) : (
         <RoomPanel
+          key={room.mediaSource.type === "youtube" ? room.roomId : `${room.roomId}:${room.mediaSource.mediaId}`}
           room={room}
-          localFile={selectedPlaybackFile}
+          localFile={selectedPlaybackFileForRoom}
           hostDownloadProgress={
-            room.mediaSource.type === "torrent_magnet" && room.hostParticipantId === selfId
+            room.mediaSource.type === "torrent_magnet" && torrentSession?.magnetUri === room.mediaSource.magnetUri
               ? torrentSession?.progress
               : undefined
           }

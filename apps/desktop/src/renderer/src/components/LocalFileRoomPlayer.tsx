@@ -588,6 +588,7 @@ export function LocalFileRoomPlayer({
   const pendingPlaybackRestoreRef = useRef<PendingPlaybackRestore | null>(null);
   const suppressDisconnectRef = useRef(false);
   const lastReportedTransferRef = useRef<TransferState | null>(null);
+  const directTorrentBaselineBytesRef = useRef<number | null>(null);
   const remoteParticipantIdRef = useRef<string | null>(null);
   const skipNextLocalPlayEventRef = useRef(false);
   const forwardNextLocalPauseEventRef = useRef(false);
@@ -619,6 +620,11 @@ export function LocalFileRoomPlayer({
   const desktopApi = window.syncplayDesktop ?? fallbackDesktopApi;
   const mediaTitle = useMemo(() => formatMediaTitle(room.mediaSource.fileName), [room.mediaSource.fileName]);
   const subtitleLabel = `${isHost ? "Host" : "Guest"} • Local file${room.subtitleTrack ? " • Shared subtitles" : ""}`;
+  const canUseLocalTorrentPlayback =
+    room.mediaSource.type === "torrent_magnet" &&
+    localFile !== null &&
+    !(localFile instanceof File) &&
+    localFile.type === "torrent_magnet";
   const hasSubtitleTrack = Boolean(room.subtitleTrack && subtitleUrl);
   const subtitleButtonTitle = hasSubtitleTrack ? "Subtitle options" : "Upload subtitles (.srt, .vtt)";
   const safeDuration = Math.max(duration, 0);
@@ -627,17 +633,19 @@ export function LocalFileRoomPlayer({
     safeDuration > 0 ? Math.min(safeDuration, Math.max(0, getPlayableBufferedUntil(videoRef.current) ?? 0)) : 0;
   const bufferedPercent = safeDuration > 0 ? Math.min(100, (playableBufferedUntil / safeDuration) * 100) : 0;
   const volumePercent = Math.min(100, Math.max(0, (isMuted ? 0 : volume) * 100));
-  const hostMagnetDownloadProgress =
-    room.mediaSource.type === "torrent_magnet" && isHost && hostDownloadProgress !== undefined
+  const torrentDownloadProgress =
+    room.mediaSource.type === "torrent_magnet" && hostDownloadProgress !== undefined
       ? Math.min(1, Math.max(0, hostDownloadProgress))
       : undefined;
   const transferProgress =
-    hostMagnetDownloadProgress ??
+    (canUseLocalTorrentPlayback && !isHost && room.mediaSource.fileSize > 0
+      ? getDirectTorrentRelativeDownloadedBytes() / room.mediaSource.fileSize
+      : torrentDownloadProgress) ??
     (room.transferState ? Math.min(1, Math.max(0, room.transferState.progress)) : 0);
   const isTransferComplete = transferProgress >= 1;
   const showTransferStatus =
     !showLoadingOverlay &&
-    (hostMagnetDownloadProgress !== undefined || (room.participants.length > 1 && !isHost && Boolean(room.transferState)));
+    (torrentDownloadProgress !== undefined || (room.participants.length > 1 && !isHost && Boolean(room.transferState)));
   const transferPercent = isTransferComplete
     ? 100
     : Math.min(99, Math.max(0, Math.floor(transferProgress * 100)));
@@ -957,6 +965,24 @@ export function LocalFileRoomPlayer({
   }, [isTheaterMode, mediaUrl]);
 
   useEffect(() => {
+    if (!canUseLocalTorrentPlayback || isHost || torrentDownloadProgress === undefined) {
+      directTorrentBaselineBytesRef.current = null;
+      return;
+    }
+
+    const currentDownloadedBytes = getTorrentDownloadedBytesFromProgress(torrentDownloadProgress);
+
+    if (directTorrentBaselineBytesRef.current === null || currentDownloadedBytes < directTorrentBaselineBytesRef.current) {
+      directTorrentBaselineBytesRef.current = currentDownloadedBytes;
+    }
+  }, [canUseLocalTorrentPlayback, isHost, room.mediaSource.mediaId, torrentDownloadProgress]);
+
+  useEffect(() => {
+    if (canUseLocalTorrentPlayback) {
+      void prepareDirectTorrentMedia();
+      return;
+    }
+
     if (isHost) {
       void prepareHostMedia();
 
@@ -970,15 +996,79 @@ export function LocalFileRoomPlayer({
     if (!cacheIdRef.current) {
       void ensureTempCache();
     }
-  }, [isHost, localFile, remoteParticipantId]);
+  }, [canUseLocalTorrentPlayback, isHost, localFile, remoteParticipantId]);
 
   useEffect(() => {
-    if (!peerSignal || peerSignal.roomId !== room.roomId) {
+    if (!canUseLocalTorrentPlayback || isHost || !mediaUrl) {
+      return;
+    }
+
+    const relativeDownloadedBytes = getDirectTorrentRelativeDownloadedBytes();
+    const availableRanges = relativeDownloadedBytes > 0 ? [{ startByte: 0, endByte: relativeDownloadedBytes }] : [];
+    availableRangesRef.current = availableRanges;
+    contiguousBytesRef.current = relativeDownloadedBytes;
+
+    const video = videoRef.current;
+    const isPlaybackReady = Boolean(video && video.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA);
+    const phase = isPlaybackReady ? (room.playbackState === "playing" ? "streaming" : "ready") : "buffering";
+
+    publishTransferState(
+      buildTransferState(phase, {
+        bytesReceived: relativeDownloadedBytes,
+        bytesPersisted: relativeDownloadedBytes,
+        availableRanges,
+        isPlaybackReady,
+        message: isPlaybackReady ? "Ready to play" : "Preparing playback"
+      })
+    );
+  }, [canUseLocalTorrentPlayback, isHost, mediaUrl, room.playbackState, torrentDownloadProgress]);
+
+  useEffect(() => {
+    if (
+      !canUseLocalTorrentPlayback ||
+      isHost ||
+      !mediaUrl ||
+      room.playbackState !== "playing" ||
+      !room.transferState?.isPlaybackReady
+    ) {
+      return;
+    }
+
+    const video = videoRef.current;
+
+    if (!video || shouldDeferAuthoritativePlayback(video, room)) {
+      return;
+    }
+
+    const expectedTime = room.currentTime + (Date.now() - room.updatedAt) / 1000;
+    const shouldCatchUp = video.paused || Math.abs(expectedTime - video.currentTime) > DRIFT_THRESHOLD_SECONDS;
+
+    if (!shouldCatchUp) {
+      return;
+    }
+
+    applyAuthoritativeState(video, {
+      ...room,
+      currentTime: expectedTime
+    });
+  }, [
+    canUseLocalTorrentPlayback,
+    isHost,
+    mediaUrl,
+    room.currentTime,
+    room.lastEventId,
+    room.playbackState,
+    room.transferState?.isPlaybackReady,
+    room.updatedAt
+  ]);
+
+  useEffect(() => {
+    if (canUseLocalTorrentPlayback || !peerSignal || peerSignal.roomId !== room.roomId) {
       return;
     }
 
     void handlePeerSignal(peerSignal);
-  }, [peerSignal, room.roomId]);
+  }, [canUseLocalTorrentPlayback, peerSignal, room.roomId]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -1055,7 +1145,7 @@ export function LocalFileRoomPlayer({
         });
       }
 
-      if (!isHost) {
+      if (!isHost && !canUseLocalTorrentPlayback) {
         const bufferedUntilTime = getExpectedBufferedUntil(video.currentTime);
 
         if (bufferedUntilTime !== undefined && bufferedUntilTime - video.currentTime < LOW_BUFFER_AHEAD_SECONDS) {
@@ -1067,7 +1157,7 @@ export function LocalFileRoomPlayer({
     return () => {
       window.clearInterval(interval);
     };
-  }, [isHost, mediaUrl, room]);
+  }, [canUseLocalTorrentPlayback, isHost, mediaUrl, room]);
 
   useEffect(() => {
     if (!import.meta.env.DEV) {
@@ -1214,7 +1304,7 @@ export function LocalFileRoomPlayer({
   }, [activeSubtitleLines, debugRole, desktopApi, isCaptionsEnabled, mediaUrl, onSubtitleTrackChange, room, selfId]);
 
   useEffect(() => {
-    if (isHost || mediaUrl) {
+    if (isHost || canUseLocalTorrentPlayback || mediaUrl) {
       return;
     }
 
@@ -1227,7 +1317,7 @@ export function LocalFileRoomPlayer({
         void finalizeGuestBrowserMedia("room-transfer-complete");
       }
     });
-  }, [isHost, mediaUrl, room.mediaSource.fileSize, room.transferState?.bytesPersisted]);
+  }, [canUseLocalTorrentPlayback, isHost, mediaUrl, room.mediaSource.fileSize, room.transferState?.bytesPersisted]);
 
   async function ensureTempCache() {
     if (cacheIdRef.current) {
@@ -1933,6 +2023,64 @@ export function LocalFileRoomPlayer({
     }
   }
 
+  async function prepareDirectTorrentMedia() {
+    if (
+      !localFile ||
+      localFile instanceof File ||
+      localFile.type !== "torrent_magnet" ||
+      mediaUrl ||
+      preparingHostMediaRef.current
+    ) {
+      return;
+    }
+
+    const torrentFile = localFile;
+    preparingHostMediaRef.current = true;
+    debugLog(debugRole, "prepareDirectTorrentMedia start", {
+      fileName: torrentFile.fileName,
+      fileSize: torrentFile.fileSize,
+      mimeType: torrentFile.mimeType
+    });
+
+    try {
+      cleanupPeer();
+      const url = isWebTorrentSelectedFile(torrentFile) ? torrentFile.playbackUrl : torrentFile.streamUrl || torrentFile.fileUrl;
+      setMediaUrl(url);
+      updateLocalMessage(isHost ? "Torrent ready on host" : "Torrent ready locally");
+
+      if (isHost) {
+        debugLog(debugRole, "prepareDirectTorrentMedia success", { url });
+        return;
+      }
+
+      const downloadedBytes = getDirectTorrentRelativeDownloadedBytes();
+      const availableRanges = downloadedBytes > 0 ? [{ startByte: 0, endByte: downloadedBytes }] : [];
+      availableRangesRef.current = availableRanges;
+      contiguousBytesRef.current = downloadedBytes;
+
+      publishTransferState(
+        buildTransferState("buffering", {
+          bytesReceived: downloadedBytes,
+          bytesPersisted: downloadedBytes,
+          availableRanges,
+          isPlaybackReady: false,
+          message: "Preparing playback"
+        }),
+        true
+      );
+      debugLog(debugRole, "prepareDirectTorrentMedia success", { url });
+    } catch {
+      const failedState = buildTransferState("failed", {
+        message: "Could not open torrent playback"
+      });
+      updateLocalMessage(failedState.message ?? "Could not open torrent playback");
+      publishTransferState(failedState, true);
+      debugLog(debugRole, "prepareDirectTorrentMedia failed");
+    } finally {
+      preparingHostMediaRef.current = false;
+    }
+  }
+
   async function createHostPeer(targetParticipantId: string) {
     reportLocalDebug("createHostPeer", { targetParticipantId });
     cleanupPeer();
@@ -2359,7 +2507,7 @@ export function LocalFileRoomPlayer({
 
     const actualMediaBufferedUntil = getMediaBufferedEnd(video);
     const hasPlayableFrame = video.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA;
-    const hasProgressiveStartupBuffer = hasMinimumProgressiveStartBytes();
+    const hasProgressiveStartupBuffer = canUseLocalTorrentPlayback ? true : hasMinimumProgressiveStartBytes();
     const isReady = hasPlayableFrame && hasProgressiveStartupBuffer;
 
     if (!isReady) {
@@ -3823,8 +3971,29 @@ export function LocalFileRoomPlayer({
     return undefined;
   }
 
+  function getTorrentDownloadedBytesFromProgress(progress: number) {
+    return Math.floor(room.mediaSource.fileSize * Math.min(1, Math.max(0, progress)));
+  }
+
+  function getDirectTorrentRelativeDownloadedBytes() {
+    if (!canUseLocalTorrentPlayback || isHost || torrentDownloadProgress === undefined) {
+      return 0;
+    }
+
+    const currentDownloadedBytes = getTorrentDownloadedBytesFromProgress(torrentDownloadProgress);
+
+    if (directTorrentBaselineBytesRef.current === null) {
+      return 0;
+    }
+
+    return Math.min(room.mediaSource.fileSize, Math.max(0, currentDownloadedBytes - directTorrentBaselineBytesRef.current));
+  }
+
   function buildTransferState(phase: TransferState["phase"], overrides: Partial<TransferState> = {}): TransferState {
-    const bytesReceived = overrides.bytesReceived ?? sumRangeBytes(availableRangesRef.current);
+    const directTorrentBytes = canUseLocalTorrentPlayback && !isHost ? getDirectTorrentRelativeDownloadedBytes() : undefined;
+    const directTorrentRanges =
+      directTorrentBytes !== undefined && directTorrentBytes > 0 ? [{ startByte: 0, endByte: directTorrentBytes }] : undefined;
+    const bytesReceived = overrides.bytesReceived ?? directTorrentBytes ?? sumRangeBytes(availableRangesRef.current);
     const bytesPersisted = overrides.bytesPersisted ?? bytesReceived;
     const bytesTotal = room.mediaSource.fileSize;
     const video = videoRef.current;
@@ -3843,7 +4012,7 @@ export function LocalFileRoomPlayer({
       pendingSeekTime: overrides.pendingSeekTime ?? pendingSeekTimeRef.current,
       reconnectAttempt: overrides.reconnectAttempt ?? (reconnectAttemptRef.current || undefined),
       lastRequestedRange: overrides.lastRequestedRange ?? getLastRequestedRange(),
-      availableRanges: overrides.availableRanges ?? availableRangesRef.current,
+      availableRanges: overrides.availableRanges ?? directTorrentRanges ?? availableRangesRef.current,
       message: overrides.message
     };
   }
