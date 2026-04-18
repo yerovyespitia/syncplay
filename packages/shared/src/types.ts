@@ -350,6 +350,10 @@ export interface TorrentSessionSummary {
   message?: string;
 }
 
+export interface ResolveMagnetOptions {
+  forceIsolatedTorrentSession?: boolean;
+}
+
 export interface TempMediaCacheMetadata {
   fileSize: number;
   mimeType: string;
@@ -379,7 +383,7 @@ export interface DesktopApi {
   openDesktopWindow(): Promise<void>;
   pickLocalFile(): Promise<PickedLocalFile | null>;
   pickLocalFileByPath(filePath: string): Promise<PickedLocalFile | null>;
-  resolveMagnetLink(magnetUri: string): Promise<TorrentSessionSummary>;
+  resolveMagnetLink(magnetUri: string, options?: ResolveMagnetOptions): Promise<TorrentSessionSummary>;
   selectTorrentFile(sessionId: string, fileIndex: number): Promise<PickedLocalFile>;
   getTorrentSessionStatus(sessionId: string): Promise<TorrentSessionSummary | null>;
   disposeTorrentSession(sessionId: string): Promise<void>;

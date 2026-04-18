@@ -556,6 +556,19 @@ select.text-input::-ms-expand {
   color: #fafafa;
 }
 
+.desktop-icon-button--danger {
+  background: rgba(190, 18, 60, 0.16);
+  border-color: rgba(244, 63, 94, 0.45);
+  color: #fecdd3;
+}
+
+.desktop-icon-button--danger:hover,
+.desktop-icon-button--danger-active {
+  background: rgba(225, 29, 72, 0.32);
+  border-color: rgba(251, 113, 133, 0.75);
+  color: #fff1f2;
+}
+
 .desktop-icon-button svg {
   width: 18px;
   height: 18px;

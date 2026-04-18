@@ -41,6 +41,9 @@ protocol.registerSchemesAsPrivileged([
 ]);
 
 app.setName(APP_NAME);
+if (isDevMode) {
+  app.commandLine.appendSwitch("remote-debugging-port", process.env.SYNCPLAY_CDP_PORT ?? "9222");
+}
 
 interface ByteRange {
   startByte: number;
@@ -80,6 +83,7 @@ interface TorrentSession {
   magnetUri: string;
   infoHash: string;
   downloadPath: string;
+  client: WebTorrentNamespace.Instance;
   torrent: WebTorrentNamespace.Torrent;
   files: TorrentMediaFile[];
   selectedFileIndex?: number;
@@ -209,20 +213,28 @@ async function loadWebTorrentModule(): Promise<any> {
   return webTorrentModulePromise;
 }
 
-async function getTorrentClient() {
-  if (torrentClient) {
-    return torrentClient;
-  }
-
+async function createTorrentClient() {
   try {
     const webTorrentModule = await loadWebTorrentModule();
     const WebTorrentCtor = (webTorrentModule?.default ?? webTorrentModule) as WebTorrentNamespace.WebTorrent;
-    torrentClient = new WebTorrentCtor();
-    return torrentClient;
+    return new WebTorrentCtor();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(`Torrent playback is unavailable on this machine: ${message}`);
   }
+}
+
+async function getTorrentClient(options: { isolated?: boolean } = {}) {
+  if (options.isolated) {
+    return createTorrentClient();
+  }
+
+  if (torrentClient) {
+    return torrentClient;
+  }
+
+  torrentClient = await createTorrentClient();
+  return torrentClient;
 }
 
 function isVideoTorrentFile(file: WebTorrentNamespace.TorrentFile) {
@@ -293,12 +305,18 @@ function mergeTorrentTrackers(magnetUri: string) {
   return Array.from(trackers);
 }
 
-async function resolveTorrentMetadata(magnetUri: string) {
+async function resolveTorrentMetadata(magnetUri: string, options: { forceIsolatedTorrentSession?: boolean } = {}) {
+  const reusableSession = options.forceIsolatedTorrentSession ? null : findReusableTorrentSession(magnetUri);
+
+  if (reusableSession) {
+    return cloneTorrentSession(magnetUri, reusableSession);
+  }
+
   const sessionId = crypto.randomUUID();
   const downloadPath = path.join(TORRENT_DOWNLOAD_ROOT, sessionId);
   await fs.mkdir(downloadPath, { recursive: true });
-  const torrentClient = await getTorrentClient();
-  const torrent = torrentClient.add(magnetUri, {
+  const client = await getTorrentClient({ isolated: options.forceIsolatedTorrentSession });
+  const torrent = client.add(magnetUri, {
     announce: mergeTorrentTrackers(magnetUri),
     path: downloadPath,
     destroyStoreOnDestroy: true
@@ -309,6 +327,7 @@ async function resolveTorrentMetadata(magnetUri: string) {
     magnetUri,
     infoHash: "",
     downloadPath,
+    client,
     torrent,
     files: []
   };
@@ -354,6 +373,35 @@ async function resolveTorrentMetadata(magnetUri: string) {
   }
 }
 
+function findReusableTorrentSession(magnetUri: string) {
+  for (const session of torrentSessions.values()) {
+    const hasSameMagnet = session.magnetUri === magnetUri;
+    const hasSameInfoHash = Boolean(session.infoHash && magnetUri.includes(session.infoHash));
+
+    if ((hasSameMagnet || hasSameInfoHash) && !session.failureMessage) {
+      return session;
+    }
+  }
+
+  return null;
+}
+
+function cloneTorrentSession(magnetUri: string, sourceSession: TorrentSession): TorrentSession {
+  const session: TorrentSession = {
+    sessionId: crypto.randomUUID(),
+    mediaId: crypto.randomUUID(),
+    magnetUri,
+    infoHash: sourceSession.infoHash,
+    downloadPath: sourceSession.downloadPath,
+    client: sourceSession.client,
+    torrent: sourceSession.torrent,
+    files: sourceSession.files
+  };
+
+  torrentSessions.set(session.sessionId, session);
+  return session;
+}
+
 async function destroyTorrentSession(sessionId: string) {
   const session = torrentSessions.get(sessionId);
 
@@ -367,9 +415,21 @@ async function destroyTorrentSession(sessionId: string) {
     localFiles.delete(session.selectedFileId);
   }
 
+  const isSharedTorrent = Array.from(torrentSessions.values()).some((candidate) => candidate.torrent === session.torrent);
+
+  if (isSharedTorrent) {
+    return;
+  }
+
   await new Promise<void>((resolve) => {
     session.torrent.destroy({ destroyStore: true }, () => resolve());
   });
+
+  const isSharedClient = Array.from(torrentSessions.values()).some((candidate) => candidate.client === session.client);
+
+  if (!isSharedClient && session.client !== torrentClient) {
+    session.client.destroy();
+  }
 }
 
 async function createPickedLocalFile(filePath: string): Promise<PickedLocalFile> {
@@ -1169,14 +1229,19 @@ app.whenReady().then(() => {
     return createPickedLocalFile(filePath.trim());
   });
 
-  ipcMain.handle("syncplay:resolve-magnet-link", async (_, magnetUri: string) => {
-    if (typeof magnetUri !== "string" || !magnetUri.trim().startsWith("magnet:?")) {
-      throw new Error("Enter a valid magnet link.");
-    }
+  ipcMain.handle(
+    "syncplay:resolve-magnet-link",
+    async (_, magnetUri: string, options?: { forceIsolatedTorrentSession?: boolean }) => {
+      if (typeof magnetUri !== "string" || !magnetUri.trim().startsWith("magnet:?")) {
+        throw new Error("Enter a valid magnet link.");
+      }
 
-    const session = await resolveTorrentMetadata(magnetUri.trim());
-    return buildTorrentSessionSummary(session);
-  });
+      const session = await resolveTorrentMetadata(magnetUri.trim(), {
+        forceIsolatedTorrentSession: Boolean(options?.forceIsolatedTorrentSession)
+      });
+      return buildTorrentSessionSummary(session);
+    }
+  );
 
   ipcMain.handle("syncplay:select-torrent-file", async (_, sessionId: string, fileIndex: number) => {
     const session = torrentSessions.get(sessionId);

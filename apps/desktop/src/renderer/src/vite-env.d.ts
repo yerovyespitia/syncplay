@@ -12,6 +12,7 @@ declare global {
       joinRoomByCode: (roomCode: string) => void;
       leaveCurrentRoom: () => Promise<void>;
       createCurrentRoom: () => void;
+      setForceIsolatedTorrentSessions: (nextValue: boolean) => void;
     };
     __syncplayLocalPlayerDebug?: {
       getState: () => unknown;

@@ -1,6 +1,7 @@
 import type {
   DesktopApi,
   PickedLocalFile,
+  ResolveMagnetOptions,
   TorrentMagnetMediaSource,
   TorrentMediaFile,
   TorrentSessionSummary
@@ -28,7 +29,7 @@ export interface TorrentSessionProvider {
   kind: "desktop" | "web";
   isSupported: boolean;
   unsupportedReason?: string;
-  resolveMagnetLink(magnetUri: string): Promise<TorrentSessionSummary>;
+  resolveMagnetLink(magnetUri: string, options?: ResolveMagnetOptions): Promise<TorrentSessionSummary>;
   selectTorrentFile(sessionId: string, fileIndex: number): Promise<SelectedTorrentFileSource>;
   getTorrentSessionStatus(sessionId: string): Promise<TorrentSessionSummary | null>;
   disposeTorrentSession(sessionId: string): Promise<void>;
@@ -119,7 +120,7 @@ function createDesktopTorrentProvider(desktopApi: DesktopApi): TorrentSessionPro
   return {
     kind: "desktop",
     isSupported: true,
-    resolveMagnetLink: (magnetUri) => desktopApi.resolveMagnetLink(magnetUri),
+    resolveMagnetLink: (magnetUri, options) => desktopApi.resolveMagnetLink(magnetUri, options),
     selectTorrentFile: (sessionId, fileIndex) => desktopApi.selectTorrentFile(sessionId, fileIndex),
     getTorrentSessionStatus: (sessionId) => desktopApi.getTorrentSessionStatus(sessionId),
     disposeTorrentSession: (sessionId) => desktopApi.disposeTorrentSession(sessionId)
@@ -144,7 +145,7 @@ function createWebTorrentProvider(): TorrentSessionProvider {
   return {
     kind: "web",
     isSupported: true,
-    resolveMagnetLink: async (magnetUri) => {
+    resolveMagnetLink: async (magnetUri, options) => {
       if (typeof magnetUri !== "string" || !magnetUri.trim().startsWith("magnet:?")) {
         throw new Error("Enter a valid magnet link.");
       }
@@ -155,7 +156,8 @@ function createWebTorrentProvider(): TorrentSessionProvider {
           "content-type": "application/json"
         },
         body: JSON.stringify({
-          magnetUri: magnetUri.trim()
+          magnetUri: magnetUri.trim(),
+          forceIsolatedTorrentSession: Boolean(options?.forceIsolatedTorrentSession)
         })
       });
 

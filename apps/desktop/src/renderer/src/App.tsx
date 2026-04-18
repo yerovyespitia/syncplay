@@ -83,6 +83,10 @@ function detectSafariBrowser() {
   return isAppleVendor && isSafariEngine && !isExcludedBrowser;
 }
 
+function readIsolatedTorrentSessionsPreference() {
+  return localStorage.getItem("syncplay:force-isolated-torrent-sessions") === "true";
+}
+
 function findMatchingTorrentFile(session: TorrentSessionSummary, mediaSource: TorrentMagnetMediaSource) {
   return (
     session.files.find((file) => file.name === mediaSource.fileName && file.size === mediaSource.fileSize) ??
@@ -203,6 +207,7 @@ export default function App() {
   const [selectedLocalFile, setSelectedLocalFile] = useState<PickedLocalFile | WebTorrentSelectedFile | null>(null);
   const [selectedPlaybackFile, setSelectedPlaybackFile] = useState<SelectedTorrentFileSource | File | null>(null);
   const [torrentSession, setTorrentSession] = useState<TorrentSessionSummary | null>(null);
+  const [forceIsolatedTorrentSessions, setForceIsolatedTorrentSessions] = useState(readIsolatedTorrentSessionsPreference);
   const [isTorrentFileSelectOpen, setIsTorrentFileSelectOpen] = useState(false);
   const [isResolvingMagnet, setIsResolvingMagnet] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
@@ -267,6 +272,11 @@ export default function App() {
         : selectedLocalFile?.type === "local_file";
   const canJoinRoom = Boolean(roomCode.trim());
 
+  function setIsolatedTorrentSessionsPreference(nextValue: boolean) {
+    setForceIsolatedTorrentSessions(nextValue);
+    localStorage.setItem("syncplay:force-isolated-torrent-sessions", String(nextValue));
+  }
+
   async function disposeActiveTorrentSession() {
     const activeSessionId = activeTorrentSessionIdRef.current;
 
@@ -309,6 +319,7 @@ export default function App() {
         roomCode,
         magnetLink,
         torrentSession,
+        forceIsolatedTorrentSessions,
         hasSelectedLocalFile: Boolean(selectedLocalFile),
         selectedLocalFile,
         debugEntries,
@@ -341,6 +352,9 @@ export default function App() {
       },
       createCurrentRoom: () => {
         handleCreateRoom();
+      },
+      setForceIsolatedTorrentSessions: (nextValue: boolean) => {
+        setIsolatedTorrentSessionsPreference(Boolean(nextValue));
       }
     };
 
@@ -356,6 +370,7 @@ export default function App() {
     localError,
     magnetLink,
     debugEntries,
+    forceIsolatedTorrentSessions,
     room,
     roomCode,
     selectedLocalFile,
@@ -429,7 +444,9 @@ export default function App() {
 
       try {
         await disposeActiveTorrentSession();
-        const nextSession = await torrentSessionProvider.resolveMagnetLink(room.mediaSource.magnetUri);
+        const nextSession = await torrentSessionProvider.resolveMagnetLink(room.mediaSource.magnetUri, {
+          forceIsolatedTorrentSession: forceIsolatedTorrentSessions
+        });
 
         if (isCancelled) {
           if (nextSession.sessionId) {
@@ -496,7 +513,15 @@ export default function App() {
         preparingGuestTorrentRoomIdRef.current = null;
       }
     };
-  }, [room?.roomId, room?.mediaSource, room?.hostParticipantId, selfId, selectedPlaybackFile, torrentSessionProvider]);
+  }, [
+    forceIsolatedTorrentSessions,
+    room?.roomId,
+    room?.mediaSource,
+    room?.hostParticipantId,
+    selfId,
+    selectedPlaybackFile,
+    torrentSessionProvider
+  ]);
 
   useEffect(() => {
     return () => {
@@ -562,7 +587,9 @@ export default function App() {
     setIsResolvingMagnet(true);
 
     try {
-      const nextSession = await torrentSessionProvider.resolveMagnetLink(magnetLink.trim());
+      const nextSession = await torrentSessionProvider.resolveMagnetLink(magnetLink.trim(), {
+        forceIsolatedTorrentSession: forceIsolatedTorrentSessions
+      });
       setTorrentSession(nextSession);
       activeTorrentSessionIdRef.current = nextSession.sessionId || null;
 
@@ -746,22 +773,47 @@ export default function App() {
                 </>
               ) : null}
               {hasDesktopBridge && isDev ? (
-                <button
-                  className="desktop-icon-button"
-                  type="button"
-                  aria-label="Open desktop window"
-                  title="Open desktop window"
-                  onClick={() => {
-                    void desktopApi.openDesktopWindow();
-                  }}
-                >
-                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                    <path
-                      fill="currentColor"
-                      d="M4 6.5A2.5 2.5 0 0 1 6.5 4h7A2.5 2.5 0 0 1 16 6.5v1h1.5A2.5 2.5 0 0 1 20 10v7.5A2.5 2.5 0 0 1 17.5 20h-7A2.5 2.5 0 0 1 8 17.5v-1H6.5A2.5 2.5 0 0 1 4 14V6.5Zm2.5-1a1 1 0 0 0-1 1V14a1 1 0 0 0 1 1H8V10A2.5 2.5 0 0 1 10.5 7.5h4V6.5a1 1 0 0 0-1-1h-7Zm4 3.5a1 1 0 0 0-1 1v7.5a1 1 0 0 0 1 1h7a1 1 0 0 0 1-1V10a1 1 0 0 0-1-1h-7Z"
-                    />
-                  </svg>
-                </button>
+                <>
+                  <button
+                    className="desktop-icon-button"
+                    type="button"
+                    aria-label="Open desktop window"
+                    title="Open desktop window"
+                    onClick={() => {
+                      void desktopApi.openDesktopWindow();
+                    }}
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                      <path
+                        fill="currentColor"
+                        d="M4 6.5A2.5 2.5 0 0 1 6.5 4h7A2.5 2.5 0 0 1 16 6.5v1h1.5A2.5 2.5 0 0 1 20 10v7.5A2.5 2.5 0 0 1 17.5 20h-7A2.5 2.5 0 0 1 8 17.5v-1H6.5A2.5 2.5 0 0 1 4 14V6.5Zm2.5-1a1 1 0 0 0-1 1V14a1 1 0 0 0 1 1H8V10A2.5 2.5 0 0 1 10.5 7.5h4V6.5a1 1 0 0 0-1-1h-7Zm4 3.5a1 1 0 0 0-1 1v7.5a1 1 0 0 0 1 1h7a1 1 0 0 0 1-1V10a1 1 0 0 0-1-1h-7Z"
+                      />
+                    </svg>
+                  </button>
+                  <button
+                    className={`desktop-icon-button desktop-icon-button--danger ${
+                      forceIsolatedTorrentSessions ? "desktop-icon-button--danger-active" : ""
+                    }`}
+                    type="button"
+                    aria-label="Isolate torrent session"
+                    aria-pressed={forceIsolatedTorrentSessions}
+                    title={
+                      forceIsolatedTorrentSessions
+                        ? "Torrent sessions are isolated"
+                        : "Reuse torrent sessions when possible"
+                    }
+                    onClick={() => {
+                      setIsolatedTorrentSessionsPreference(!forceIsolatedTorrentSessions);
+                    }}
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                      <path
+                        fill="currentColor"
+                        d="M12 3 5 5.6v5.3c0 4.3 2.8 8.2 7 10.1 4.2-1.9 7-5.8 7-10.1V5.6L12 3Zm0 2.1 5 1.85v3.95c0 3.2-1.9 6.2-5 7.85-3.1-1.65-5-4.65-5-7.85V6.95l5-1.85Zm-2.35 4.2-1.4 1.4L10.55 13l-2.3 2.3 1.4 1.4 2.3-2.3 2.3 2.3 1.4-1.4-2.3-2.3 2.3-2.3-1.4-1.4-2.3 2.3-2.3-2.3Z"
+                      />
+                    </svg>
+                  </button>
+                </>
               ) : null}
             </div>
           </header>
