@@ -1119,7 +1119,9 @@ export function LocalFileRoomPlayer({
     }
 
     applyAuthoritativeState(video, remoteCommand.room, {
-      forceChaseBufferedTarget: remoteCommand.kind === "sync" && remoteCommand.actorId !== selfId
+      forceChaseBufferedTarget:
+        remoteCommand.actorId !== selfId &&
+        (remoteCommand.kind === "sync" || (remoteCommand.kind === "event" && remoteCommand.action === "player_seek"))
     });
     lastAppliedEventIdRef.current = remoteCommand.room.lastEventId;
   }, [mediaUrl, remoteCommand, selfId]);
