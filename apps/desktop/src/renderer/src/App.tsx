@@ -196,6 +196,7 @@ export default function App() {
   const desktopApi = window.syncplayDesktop ?? fallbackDesktopApi;
   const isDev = import.meta.env.DEV;
   const hasDesktopBridge = Boolean(window.syncplayDesktop);
+  const shouldShowDesktopDevControls = isDev && hasDesktopBridge;
   const torrentSessionProvider = useMemo(() => createTorrentSessionProvider(window.syncplayDesktop), []);
   const platformLabel = formatPlatformLabel(desktopApi.platform || detectPlatformLabel());
   const electronVersionLabel = desktopApi.electronVersion || detectElectronVersion();
@@ -207,7 +208,9 @@ export default function App() {
   const [selectedLocalFile, setSelectedLocalFile] = useState<PickedLocalFile | WebTorrentSelectedFile | null>(null);
   const [selectedPlaybackFile, setSelectedPlaybackFile] = useState<SelectedTorrentFileSource | File | null>(null);
   const [torrentSession, setTorrentSession] = useState<TorrentSessionSummary | null>(null);
-  const [forceIsolatedTorrentSessions, setForceIsolatedTorrentSessions] = useState(readIsolatedTorrentSessionsPreference);
+  const [forceIsolatedTorrentSessions, setForceIsolatedTorrentSessions] = useState(() =>
+    isDev ? readIsolatedTorrentSessionsPreference() : false
+  );
   const [isTorrentFileSelectOpen, setIsTorrentFileSelectOpen] = useState(false);
   const [isResolvingMagnet, setIsResolvingMagnet] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
@@ -243,6 +246,7 @@ export default function App() {
   const shouldShowMagnetSupportWarning = sourceOption === "torrent_magnet" && !torrentSessionProvider.isSupported;
   const shouldBlockSafariMagnetFlow = sourceOption === "torrent_magnet" && isSafariBrowser;
   const hasResolvedMagnet = Boolean(torrentSession && torrentSession.phase !== "failed");
+  const shouldForceIsolatedTorrentSessions = isDev && forceIsolatedTorrentSessions;
 
   function handleRequestSync() {
     const localVideo = document.querySelector("video");
@@ -445,7 +449,7 @@ export default function App() {
       try {
         await disposeActiveTorrentSession();
         const nextSession = await torrentSessionProvider.resolveMagnetLink(room.mediaSource.magnetUri, {
-          forceIsolatedTorrentSession: forceIsolatedTorrentSessions
+          forceIsolatedTorrentSession: shouldForceIsolatedTorrentSessions
         });
 
         if (isCancelled) {
@@ -514,11 +518,11 @@ export default function App() {
       }
     };
   }, [
-    forceIsolatedTorrentSessions,
     room?.roomId,
     room?.mediaSource,
     room?.hostParticipantId,
     selfId,
+    shouldForceIsolatedTorrentSessions,
     selectedPlaybackFile,
     torrentSessionProvider
   ]);
@@ -588,7 +592,7 @@ export default function App() {
 
     try {
       const nextSession = await torrentSessionProvider.resolveMagnetLink(magnetLink.trim(), {
-        forceIsolatedTorrentSession: forceIsolatedTorrentSessions
+        forceIsolatedTorrentSession: shouldForceIsolatedTorrentSessions
       });
       setTorrentSession(nextSession);
       activeTorrentSessionIdRef.current = nextSession.sessionId || null;
@@ -772,7 +776,7 @@ export default function App() {
                   </span>
                 </>
               ) : null}
-              {hasDesktopBridge && isDev ? (
+              {shouldShowDesktopDevControls ? (
                 <>
                   <button
                     className="desktop-icon-button"
