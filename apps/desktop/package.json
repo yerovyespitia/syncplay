@@ -7,10 +7,11 @@
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
-    "dist": "bun run build && electron-builder",
-    "dist:mac": "bun run build && electron-builder --mac",
-    "dist:win": "bun run build && electron-builder --win nsis --x64",
-    "dist:linux": "bun run build && electron-builder --linux",
+    "prepare:native": "electron-builder install-app-deps",
+    "dist": "bun run build && bun run prepare:native && electron-builder",
+    "dist:mac": "node ../../scripts/ensure-native-build-platform.mjs mac && bun run build && bun run prepare:native && electron-builder --mac",
+    "dist:win": "node ../../scripts/ensure-native-build-platform.mjs win && bun run build && bun run prepare:native && electron-builder --win nsis --x64",
+    "dist:linux": "node ../../scripts/ensure-native-build-platform.mjs linux && bun run build && bun run prepare:native && electron-builder --linux",
     "check": "tsc --noEmit -p tsconfig.json"
   },
   "build": {

@@ -34,3 +34,14 @@ bun run test
 bun run build
 ```
 
+## Builds desktop
+
+Los instaladores desktop deben generarse en el mismo sistema operativo de destino:
+
+```bash
+bun run dist:mac
+bun run dist:win
+bun run dist:linux
+```
+
+`apps/desktop` usa dependencias nativas de torrent (`webtorrent`/`node-datachannel`), así que un build cruzado puede empaquetar un binario `.node` incorrecto y romper la reproducción de magnet links en la máquina destino.
