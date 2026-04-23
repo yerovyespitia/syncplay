@@ -1,3 +1,5 @@
+import "./SyncPlayLogo.css";
+
 interface SyncPlayLogoProps {
   className?: string;
   title?: string;

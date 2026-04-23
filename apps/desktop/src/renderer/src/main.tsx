@@ -1,8 +1,8 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 
-import App from "./App";
 import "./styles/app.css";
+import App from "./App";
 
 if ("serviceWorker" in navigator && window.isSecureContext) {
   window.__syncplayLocalMediaServiceWorkerReady = navigator.serviceWorker

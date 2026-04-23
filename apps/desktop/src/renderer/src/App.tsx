@@ -7,8 +7,8 @@ import appleDarkIcon from "./assets/apple-dark.svg";
 import electronIcon from "./assets/electron.svg";
 import linuxIcon from "./assets/linux.svg";
 import windowsIcon from "./assets/windows.svg";
-import { RoomPanel } from "./components/RoomPanel";
-import { SyncPlayLogo } from "./components/SyncPlayLogo";
+import { RoomPanel } from "./components/RoomPanel/RoomPanel";
+import { SyncPlayLogo } from "./components/SyncPlayLogo/SyncPlayLogo";
 import { useRoomConnection } from "./hooks/useRoomConnection";
 import {
   createTorrentSessionProvider,

@@ -1,0 +1,18 @@
+.local-player-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.local-player-shell--theater {
+  margin-inline: 0;
+}
+
+.local-player-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  color: #a1a1aa;
+  font-size: 0.82rem;
+  padding-inline: 2px;
+}

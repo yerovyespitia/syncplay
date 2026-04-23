@@ -9,10 +9,11 @@ import type {
   YoutubeMediaSource
 } from "@syncplay/shared";
 
-import type { DebugEntry } from "../hooks/useRoomConnection";
-import type { SelectedTorrentFileSource } from "../lib/torrentSessionProvider";
-import { LocalFileRoomPlayer } from "./LocalFileRoomPlayer";
-import { YouTubeRoomPlayer } from "./YouTubeRoomPlayer";
+import type { DebugEntry } from "../../hooks/useRoomConnection";
+import type { SelectedTorrentFileSource } from "../../lib/torrentSessionProvider";
+import { LocalFileRoomPlayer } from "../LocalFileRoomPlayer/LocalFileRoomPlayer";
+import { YouTubeRoomPlayer } from "../YouTubeRoomPlayer/YouTubeRoomPlayer";
+import "./RoomPanel.css";
 
 type RemotePlaybackCommand =
   | {

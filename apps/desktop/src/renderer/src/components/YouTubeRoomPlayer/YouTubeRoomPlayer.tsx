@@ -3,7 +3,8 @@ import YouTube, { type YouTubeEvent } from "react-youtube";
 
 import type { RoomState, YoutubeMediaSource } from "@syncplay/shared";
 
-import type { DebugEntry } from "../hooks/useRoomConnection";
+import type { DebugEntry } from "../../hooks/useRoomConnection";
+import "./YouTubeRoomPlayer.css";
 
 type YoutubePlayerApi = {
   getCurrentTime(): number | Promise<number>;
