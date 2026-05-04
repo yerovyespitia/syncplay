@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import YouTube, { type YouTubeEvent } from "react-youtube";
 
 import type { RoomState, YoutubeMediaSource } from "@syncplay/shared";
@@ -52,6 +52,7 @@ export function YouTubeRoomPlayer({ room, selfId, remoteCommand, onPlay, onPause
   const isReadyRef = useRef(false);
   const lastAppliedEventIdRef = useRef(-1);
   const lastVideoIdRef = useRef<string | null>(null);
+  const [playerNotice, setPlayerNotice] = useState<string | null>(null);
 
   const playerOptions = useMemo(
     () => ({
@@ -120,6 +121,10 @@ export function YouTubeRoomPlayer({ room, selfId, remoteCommand, onPlay, onPause
     };
   }, [room]);
 
+  useEffect(() => {
+    setPlayerNotice(null);
+  }, [room.mediaSource.videoId]);
+
   function handleReady(event: YouTubeEvent<number>) {
     playerRef.current = event.target;
     isReadyRef.current = true;
@@ -162,6 +167,7 @@ export function YouTubeRoomPlayer({ room, selfId, remoteCommand, onPlay, onPause
   }
 
   function handleError(event: YouTubeEvent<number>) {
+    setPlayerNotice(getYouTubePlayerNotice(event.data));
     onDebug({
       scope: "youtube",
       message: `player error ${String(event.data)}`,
@@ -170,16 +176,22 @@ export function YouTubeRoomPlayer({ room, selfId, remoteCommand, onPlay, onPause
   }
 
   return (
-    <div className="player-wrapper">
-      <YouTube
-        className="youtube-frame"
-        iframeClassName="youtube-iframe"
-        videoId={room.mediaSource.videoId}
-        opts={playerOptions}
-        onReady={handleReady}
-        onStateChange={handleStateChange}
-        onError={handleError}
-      />
+    <div className="youtube-player-shell">
+      <div className="player-wrapper">
+        <YouTube
+          className="youtube-frame"
+          iframeClassName="youtube-iframe"
+          videoId={room.mediaSource.videoId}
+          opts={playerOptions}
+          onReady={handleReady}
+          onStateChange={handleStateChange}
+          onError={handleError}
+        />
+      </div>
+      <p className="youtube-room-note">
+        YouTube availability can change by country, account restrictions, or whether the video allows embedded playback.
+      </p>
+      {playerNotice ? <div className="youtube-player-notice">{playerNotice}</div> : null}
     </div>
   );
 
@@ -247,5 +259,21 @@ export function YouTubeRoomPlayer({ room, selfId, remoteCommand, onPlay, onPause
         startSeconds
       })
     });
+  }
+}
+
+function getYouTubePlayerNotice(errorCode: number) {
+  switch (errorCode) {
+    case 100:
+      return "This YouTube video is unavailable, private, or no longer published.";
+    case 101:
+    case 150:
+      return "This video cannot be played inside SyncPlay. The uploader or YouTube requires watching it directly on YouTube, and availability may also vary by country.";
+    case 2:
+      return "This YouTube link looks invalid. Try pasting the video URL again.";
+    case 5:
+      return "YouTube could not load this video in the embedded player. Try reloading the room, disabling blockers, or opening the video directly on YouTube.";
+    default:
+      return "YouTube could not load this video here. This can happen because of embed restrictions, regional blocks, or temporary playback issues.";
   }
 }

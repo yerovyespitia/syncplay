@@ -894,6 +894,9 @@ export default function App() {
                   <p className="helper-text">
                     {parsedVideo ? `Detected video id: ${parsedVideo.videoId}` : "Supports watch, short and embed URLs."}
                   </p>
+                  <p className="helper-text">
+                    Some YouTube videos may fail in rooms because of country restrictions, age/account limits, or embed permissions controlled by YouTube.
+                  </p>
                 </>
               ) : sourceOption === "local_file" ? (
                 <>
