@@ -74,6 +74,7 @@ interface RoomPanelProps {
   onPeerIceCandidate: (targetParticipantId: string, candidate: RTCIceCandidateInit) => void;
   onTransferState: (transferState: TransferState) => void;
   onSubtitleTrackChange: (subtitleTrack: SubtitleTrack) => void;
+  onStartRelayFallback: (reason: "low_throughput" | "buffer_instability" | "manual_resync") => void;
 }
 
 function CodeIcon() {
@@ -172,7 +173,8 @@ export function RoomPanel({
   onPeerAnswer,
   onPeerIceCandidate,
   onTransferState,
-  onSubtitleTrackChange
+  onSubtitleTrackChange,
+  onStartRelayFallback
 }: RoomPanelProps) {
   const [copied, setCopied] = useState(false);
   const [logsCopied, setLogsCopied] = useState(false);
@@ -363,6 +365,7 @@ export function RoomPanel({
               onTheaterModeChange={setIsTheaterMode}
               onTransferState={onTransferState}
               onSubtitleTrackChange={onSubtitleTrackChange}
+              onStartRelayFallback={onStartRelayFallback}
             />
           )}
         </div>

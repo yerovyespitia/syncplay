@@ -14,6 +14,7 @@ import {
   isWebTorrentSelectedFile,
   type SelectedTorrentFileSource
 } from "../../lib/torrentSessionProvider";
+import { getServerBaseUrl } from "../../lib/config";
 import { VideoPlayer } from "../VideoPlayer/VideoPlayer";
 import "./LocalFileRoomPlayer.css";
 
@@ -77,6 +78,7 @@ interface LocalFileRoomPlayerProps {
   onTheaterModeChange: (isTheaterMode: boolean) => void;
   onTransferState: (transferState: TransferState) => void;
   onSubtitleTrackChange: (subtitleTrack: SubtitleTrack) => void;
+  onStartRelayFallback: (reason: "low_throughput" | "buffer_instability" | "manual_resync") => void;
 }
 
 const CHUNK_SIZE = 128 * 1024;
@@ -103,6 +105,16 @@ const DATA_CHANNEL_LOW_WATER_MARK = 512 * 1024;
 const ICE_SERVERS: RTCIceServer[] = [{ urls: "stun:stun.l.google.com:19302" }];
 const CONTROLS_IDLE_DELAY_MS = 3000;
 const MEDIA_TITLE_MAX_LENGTH = 50;
+const DEFAULT_EFFECTIVE_BITRATE_BPS = 12_000_000;
+const RELAY_LOW_BUFFER_THRESHOLD_SECONDS = 8;
+const RELAY_BUFFER_STREAK_THRESHOLD = 2;
+const RELAY_LOW_THROUGHPUT_WINDOW_MS = 5000;
+const RELAY_REBUFFER_WINDOW_MS = 20_000;
+const RELAY_REBUFFER_THRESHOLD = 2;
+const RELAY_UPLOAD_CHUNK_BYTES = 1024 * 1024;
+const RELAY_UPLOAD_TARGET_AHEAD_BYTES = 64 * 1024 * 1024;
+const RELAY_STATUS_POLL_MS = 600;
+const RELAY_FALLBACK_MIN_PLAYBACK_MS = 5_000;
 
 type PeerControlMessage =
   | {
@@ -366,6 +378,36 @@ function isDesktopPickedLocalFile(value: SelectedTorrentFileSource | File): valu
   return "fileId" in value;
 }
 
+type RelayStatusResponse = {
+  sessionId: string;
+  availableRanges: ByteRange[];
+  contiguousBytes: number;
+  uploadedBytes: number;
+  largestRequestedEndByte: number;
+  expiresAt: number;
+};
+
+function buildAbsoluteRelayUrl(pathOrUrl: string) {
+  return new URL(pathOrUrl, getServerBaseUrl()).toString();
+}
+
+function formatByteCount(bytes: number) {
+  if (!Number.isFinite(bytes) || bytes <= 0) {
+    return "0 B";
+  }
+
+  const units = ["B", "KB", "MB", "GB"];
+  let value = bytes;
+  let unitIndex = 0;
+
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+
+  return `${value >= 10 || unitIndex === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[unitIndex]}`;
+}
+
 export function LocalFileRoomPlayer({
   room,
   selfId,
@@ -387,7 +429,8 @@ export function LocalFileRoomPlayer({
   onPeerIceCandidate,
   onTheaterModeChange,
   onTransferState,
-  onSubtitleTrackChange
+  onSubtitleTrackChange,
+  onStartRelayFallback
 }: LocalFileRoomPlayerProps) {
   const isHost = room.hostParticipantId === selfId;
   const peerRef = useRef<RTCPeerConnection | null>(null);
@@ -454,6 +497,23 @@ export function LocalFileRoomPlayer({
   const subtitleObjectUrlRef = useRef<string | null>(null);
   const subtitleMenuRef = useRef<HTMLDivElement | null>(null);
   const subtitleTrackListenersRef = useRef<Array<{ track: TextTrack; listener: () => void }>>([]);
+  const relayFallbackRequestedRef = useRef(false);
+  const relaySwitchCompletedRef = useRef(false);
+  const throughputWindowRef = useRef<{ startedAt: number; bytes: number }>({ startedAt: Date.now(), bytes: 0 });
+  const measuredGoodputBpsRef = useRef(0);
+  const lowThroughputSinceRef = useRef<number | null>(null);
+  const lowBufferStreakRef = useRef(0);
+  const rebufferTimestampsRef = useRef<number[]>([]);
+  const relayUploaderRunningRef = useRef(false);
+  const relayTrailingRangeUploadedRef = useRef(false);
+  const isRelayTransportActiveRef = useRef(false);
+  const stablePlaybackStartedAtRef = useRef<number | null>(null);
+  const sentChunkCountRef = useRef(0);
+  const sentChunkBytesRef = useRef(0);
+  const receivedChunkCountRef = useRef(0);
+  const receivedChunkBytesRef = useRef(0);
+  const relayUploadedChunkCountRef = useRef(0);
+  const relayUploadedChunkBytesRef = useRef(0);
   const [mediaUrl, setMediaUrl] = useState<string | null>(null);
   const [subtitleUrl, setSubtitleUrl] = useState<string | null>(null);
   const [activeSubtitleLines, setActiveSubtitleLines] = useState<string[]>([]);
@@ -494,6 +554,8 @@ export function LocalFileRoomPlayer({
       : torrentDownloadProgress) ??
     (room.transferState ? Math.min(1, Math.max(0, room.transferState.progress)) : 0);
   const isTransferComplete = transferProgress >= 1;
+  const relayPlaybackUrl = room.transferState?.relayPlaybackUrl ? buildAbsoluteRelayUrl(room.transferState.relayPlaybackUrl) : null;
+  const isRelayTransportActive = room.transferState?.transportMode === "relay_http" && room.mediaSource.type === "local_file";
   const showTransferStatus =
     !showLoadingOverlay &&
     (torrentDownloadProgress !== undefined || (room.participants.length > 1 && !isHost && Boolean(room.transferState)));
@@ -510,10 +572,146 @@ export function LocalFileRoomPlayer({
     });
   }
 
+  function getEffectiveBitrateBps() {
+    if (durationRef.current > 0 && room.mediaSource.fileSize > 0) {
+      return Math.max(1, Math.round((room.mediaSource.fileSize * 8) / durationRef.current));
+    }
+
+    return DEFAULT_EFFECTIVE_BITRATE_BPS;
+  }
+
+  function recordIncomingTransferChunk(byteLength: number) {
+    const now = Date.now();
+    const windowState = throughputWindowRef.current;
+
+    if (now - windowState.startedAt >= 1000) {
+      const elapsedMs = Math.max(1, now - windowState.startedAt);
+      measuredGoodputBpsRef.current = Math.round((windowState.bytes * 8 * 1000) / elapsedMs);
+      throughputWindowRef.current = {
+        startedAt: now,
+        bytes: byteLength
+      };
+      return;
+    }
+
+    windowState.bytes += byteLength;
+  }
+
+  function recordRebufferEvent(trigger: string) {
+    if (stablePlaybackStartedAtRef.current === null) {
+      return;
+    }
+
+    const now = Date.now();
+    rebufferTimestampsRef.current = [...rebufferTimestampsRef.current.filter((timestamp) => now - timestamp <= RELAY_REBUFFER_WINDOW_MS), now];
+    reportLocalDebug("rebuffer detected", {
+      trigger,
+      count: rebufferTimestampsRef.current.length
+    });
+  }
+
+  function maybeRequestRelayFallback() {
+    if (
+      relayFallbackRequestedRef.current ||
+      isHost ||
+      canUseLocalTorrentPlayback ||
+      room.mediaSource.type !== "local_file" ||
+      isRelayTransportActive ||
+      isGuestCacheTransferComplete() ||
+      canSeekThroughCurrentMediaSource()
+    ) {
+      return;
+    }
+
+    const video = videoRef.current;
+    const bufferAheadSeconds = getBufferedAheadSeconds(video) ?? 0;
+    const now = Date.now();
+    const effectiveBitrateBps = getEffectiveBitrateBps();
+    const measuredGoodputBps = measuredGoodputBpsRef.current;
+    const isPlaybackActive = room.playbackState === "playing" && Boolean(mediaUrl);
+    const stablePlaybackElapsedMs = stablePlaybackStartedAtRef.current ? now - stablePlaybackStartedAtRef.current : 0;
+
+    if (stablePlaybackElapsedMs < RELAY_FALLBACK_MIN_PLAYBACK_MS) {
+      return;
+    }
+
+    if (isPlaybackActive && bufferAheadSeconds < RELAY_LOW_BUFFER_THRESHOLD_SECONDS) {
+      lowBufferStreakRef.current += 1;
+    } else {
+      lowBufferStreakRef.current = 0;
+    }
+
+    if (measuredGoodputBps > 0 && measuredGoodputBps < effectiveBitrateBps * 1.35) {
+      lowThroughputSinceRef.current ??= now;
+    } else {
+      lowThroughputSinceRef.current = null;
+    }
+
+    const rebufferCount = rebufferTimestampsRef.current.filter((timestamp) => now - timestamp <= RELAY_REBUFFER_WINDOW_MS).length;
+    const lowThroughputDuration = lowThroughputSinceRef.current ? now - lowThroughputSinceRef.current : 0;
+
+    let reason: "low_throughput" | "buffer_instability" | null = null;
+
+    if (rebufferCount >= RELAY_REBUFFER_THRESHOLD) {
+      reason = "buffer_instability";
+    } else if (lowThroughputDuration >= RELAY_LOW_THROUGHPUT_WINDOW_MS && bufferAheadSeconds < RELAY_LOW_BUFFER_THRESHOLD_SECONDS) {
+      reason = "low_throughput";
+    }
+
+    if (!reason) {
+      return;
+    }
+
+    relayFallbackRequestedRef.current = true;
+    updateLocalMessage("Switching to optimized relay");
+    publishTransferState(
+      buildTransferState("buffering", {
+        transportReason: reason,
+        message: "Switching to optimized relay"
+      }),
+      true
+    );
+    onStartRelayFallback(reason);
+  }
+
+  async function fetchRelayStatus(sessionId: string) {
+    const response = await fetch(buildAbsoluteRelayUrl(`/api/local-media/sessions/${encodeURIComponent(sessionId)}/status`));
+
+    if (!response.ok) {
+      throw new Error("Could not read relay session status.");
+    }
+
+    return (await response.json()) as RelayStatusResponse;
+  }
+
+  async function uploadRelayRange(sessionId: string, startByte: number, endByte: number, bytes: Uint8Array) {
+    const response = await fetch(buildAbsoluteRelayUrl(`/api/local-media/sessions/${encodeURIComponent(sessionId)}/ranges`), {
+      method: "PUT",
+      headers: {
+        "content-type": "application/octet-stream",
+        "x-start-byte": String(startByte),
+        "x-end-byte": String(endByte)
+      },
+      body: new Blob([toBlobPart(bytes)], { type: "application/octet-stream" })
+    });
+
+    if (!response.ok) {
+      const body = (await response.json().catch(() => null)) as { message?: string } | null;
+      throw new Error(body?.message ?? "Relay upload failed.");
+    }
+
+    relayUploadedChunkCountRef.current += 1;
+    relayUploadedChunkBytesRef.current += bytes.byteLength;
+  }
+
   const remoteParticipantId = useMemo(
     () => room.participants.find((participant) => participant.id !== selfId)?.id ?? null,
     [room.participants, selfId]
   );
+
+  useEffect(() => {
+    isRelayTransportActiveRef.current = isRelayTransportActive;
+  }, [isRelayTransportActive]);
 
   useEffect(() => {
     remoteParticipantIdRef.current = remoteParticipantId;
@@ -603,6 +801,26 @@ export function LocalFileRoomPlayer({
       setCurrentTime(0);
     }
   }, [showLoadingOverlay]);
+
+  useEffect(() => {
+    stablePlaybackStartedAtRef.current = null;
+    rebufferTimestampsRef.current = [];
+    lowBufferStreakRef.current = 0;
+    lowThroughputSinceRef.current = null;
+    relayFallbackRequestedRef.current = false;
+    relaySwitchCompletedRef.current = false;
+    throughputWindowRef.current = {
+      startedAt: Date.now(),
+      bytes: 0
+    };
+    measuredGoodputBpsRef.current = 0;
+    sentChunkCountRef.current = 0;
+    sentChunkBytesRef.current = 0;
+    receivedChunkCountRef.current = 0;
+    receivedChunkBytesRef.current = 0;
+    relayUploadedChunkCountRef.current = 0;
+    relayUploadedChunkBytesRef.current = 0;
+  }, [room.roomId]);
 
   useEffect(() => {
     return () => {
@@ -837,7 +1055,7 @@ export function LocalFileRoomPlayer({
     if (isHost) {
       void prepareHostMedia();
 
-      if (remoteParticipantId && !peerRef.current) {
+      if (remoteParticipantId && !peerRef.current && !isRelayTransportActive) {
         void createHostPeer(remoteParticipantId);
       }
 
@@ -847,7 +1065,7 @@ export function LocalFileRoomPlayer({
     if (!cacheIdRef.current) {
       void ensureTempCache();
     }
-  }, [canUseLocalTorrentPlayback, isHost, localFile, remoteParticipantId]);
+  }, [canUseLocalTorrentPlayback, isHost, isRelayTransportActive, localFile, remoteParticipantId]);
 
   useEffect(() => {
     if (!canUseLocalTorrentPlayback || isHost || !mediaUrl) {
@@ -914,12 +1132,140 @@ export function LocalFileRoomPlayer({
   ]);
 
   useEffect(() => {
-    if (canUseLocalTorrentPlayback || !peerSignal || peerSignal.roomId !== room.roomId) {
+    if (canUseLocalTorrentPlayback || isRelayTransportActive || !peerSignal || peerSignal.roomId !== room.roomId) {
       return;
     }
 
     void handlePeerSignal(peerSignal);
-  }, [canUseLocalTorrentPlayback, peerSignal, room.roomId]);
+  }, [canUseLocalTorrentPlayback, isRelayTransportActive, peerSignal, room.roomId]);
+
+  useEffect(() => {
+    if (
+      isHost ||
+      canUseLocalTorrentPlayback ||
+      room.mediaSource.type !== "local_file" ||
+      !relayPlaybackUrl ||
+      !isRelayTransportActive
+    ) {
+      return;
+    }
+
+    if (relaySwitchCompletedRef.current && mediaUrl === relayPlaybackUrl) {
+      return;
+    }
+
+    const video = videoRef.current;
+    pendingPlaybackRestoreRef.current = {
+      time: video?.currentTime ?? room.currentTime,
+      shouldPlay: room.playbackState === "playing" && !video?.paused
+    };
+    relaySwitchCompletedRef.current = true;
+    relayFallbackRequestedRef.current = true;
+    cleanupPeer();
+    setMediaUrl(relayPlaybackUrl);
+    updateLocalMessage(mediaUrl ? "Streaming via relay" : "Switching to optimized relay");
+  }, [
+    canUseLocalTorrentPlayback,
+    isHost,
+    isRelayTransportActive,
+    mediaUrl,
+    relayPlaybackUrl,
+    room.currentTime,
+    room.mediaSource.type,
+    room.playbackState
+  ]);
+
+  useEffect(() => {
+    if (
+      isHost ||
+      canUseLocalTorrentPlayback ||
+      room.mediaSource.type !== "local_file" ||
+      isRelayTransportActive ||
+      relayFallbackRequestedRef.current
+    ) {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      maybeRequestRelayFallback();
+    }, 1000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [canUseLocalTorrentPlayback, isHost, isRelayTransportActive, mediaUrl, room.mediaSource.type, room.playbackState]);
+
+  useEffect(() => {
+    if (
+      !isHost ||
+      canUseLocalTorrentPlayback ||
+      room.mediaSource.type !== "local_file" ||
+      !isRelayTransportActive ||
+      !room.transferState?.relaySessionId ||
+      !localFile
+    ) {
+      relayUploaderRunningRef.current = false;
+      relayTrailingRangeUploadedRef.current = false;
+      return;
+    }
+
+    let cancelled = false;
+    relayUploaderRunningRef.current = true;
+
+    void (async () => {
+      while (!cancelled && relayUploaderRunningRef.current) {
+        try {
+          const status = await fetchRelayStatus(room.transferState?.relaySessionId ?? "");
+
+          if (!relayTrailingRangeUploadedRef.current && room.mediaSource.fileSize > TRAILING_METADATA_WINDOW_BYTES) {
+            const trailingStartByte = Math.max(0, room.mediaSource.fileSize - TRAILING_METADATA_WINDOW_BYTES);
+            const trailingBytes = await readLocalChunk(localFile, trailingStartByte, room.mediaSource.fileSize - trailingStartByte);
+            await uploadRelayRange(room.transferState?.relaySessionId ?? "", trailingStartByte, trailingStartByte + trailingBytes.byteLength, trailingBytes);
+            relayTrailingRangeUploadedRef.current = true;
+          }
+
+          const targetEndByte = Math.min(
+            room.mediaSource.fileSize,
+            Math.max(status.largestRequestedEndByte, status.contiguousBytes) + RELAY_UPLOAD_TARGET_AHEAD_BYTES
+          );
+
+          if (status.contiguousBytes >= targetEndByte) {
+            await new Promise((resolve) => window.setTimeout(resolve, RELAY_STATUS_POLL_MS));
+            continue;
+          }
+
+          const nextStartByte = status.contiguousBytes;
+          const nextEndByte = Math.min(room.mediaSource.fileSize, nextStartByte + RELAY_UPLOAD_CHUNK_BYTES);
+          const nextChunk = await readLocalChunk(localFile, nextStartByte, nextEndByte - nextStartByte);
+
+          if (nextChunk.byteLength === 0) {
+            await new Promise((resolve) => window.setTimeout(resolve, RELAY_STATUS_POLL_MS));
+            continue;
+          }
+
+          await uploadRelayRange(room.transferState?.relaySessionId ?? "", nextStartByte, nextStartByte + nextChunk.byteLength, nextChunk);
+        } catch (error) {
+          reportLocalDebug("relay uploader paused", {
+            error: formatError(error)
+          });
+          await new Promise((resolve) => window.setTimeout(resolve, RELAY_STATUS_POLL_MS));
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      relayUploaderRunningRef.current = false;
+    };
+  }, [
+    canUseLocalTorrentPlayback,
+    isHost,
+    isRelayTransportActive,
+    localFile,
+    room.mediaSource.fileSize,
+    room.mediaSource.type,
+    room.transferState?.relaySessionId
+  ]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -1111,6 +1457,14 @@ export function LocalFileRoomPlayer({
           Array.from(guestBrowserChunkMapRef.current.keys()).sort((left, right) => left - right)[0] ?? null,
         contiguousBytes: contiguousBytesRef.current,
         availableRanges: availableRangesRef.current,
+        chunkStats: {
+          sentChunks: sentChunkCountRef.current,
+          sentBytes: sentChunkBytesRef.current,
+          receivedChunks: receivedChunkCountRef.current,
+          receivedBytes: receivedChunkBytesRef.current,
+          relayUploadedChunks: relayUploadedChunkCountRef.current,
+          relayUploadedBytes: relayUploadedChunkBytesRef.current
+        },
         roomTransferState: room.transferState,
         video: videoRef.current
           ? {
@@ -2128,6 +2482,11 @@ export function LocalFileRoomPlayer({
       return;
     }
 
+    if (isRelayTransportActiveRef.current) {
+      cleanupPeer();
+      return;
+    }
+
     reconnectAttemptRef.current += 1;
     reportLocalDebug("peer disconnect", {
       targetParticipantId,
@@ -2148,7 +2507,11 @@ export function LocalFileRoomPlayer({
 
     if (isHost) {
       window.setTimeout(() => {
-        if (room.hostParticipantId === selfId && remoteParticipantIdRef.current === targetParticipantId) {
+        if (
+          !isRelayTransportActiveRef.current &&
+          room.hostParticipantId === selfId &&
+          remoteParticipantIdRef.current === targetParticipantId
+        ) {
           void createHostPeer(targetParticipantId);
         }
       }, 600);
@@ -2261,6 +2624,8 @@ export function LocalFileRoomPlayer({
         } satisfies PeerControlMessage)
       );
       channel.send(Uint8Array.from(chunk));
+      sentChunkCountRef.current += 1;
+      sentChunkBytesRef.current += chunk.byteLength;
       offset = endByte;
       chunksSinceYield += 1;
 
@@ -2308,6 +2673,9 @@ export function LocalFileRoomPlayer({
 
     pendingChunkMetaQueueRef.current = pendingChunkMetaQueueRef.current.slice(1);
     const chunk = payload instanceof Blob ? new Uint8Array(await payload.arrayBuffer()) : new Uint8Array(payload);
+    recordIncomingTransferChunk(chunk.byteLength);
+    receivedChunkCountRef.current += 1;
+    receivedChunkBytesRef.current += chunk.byteLength;
 
     const cacheHandle = await ensureTempCache();
     if (cacheHandle.cacheId) {
@@ -2425,7 +2793,7 @@ export function LocalFileRoomPlayer({
   }
 
   function requestNextRange(reason: RangeRequestReason) {
-    if (isHost || !dataChannelRef.current || dataChannelRef.current.readyState !== "open") {
+    if (isHost || isRelayTransportActive || !dataChannelRef.current || dataChannelRef.current.readyState !== "open") {
       return false;
     }
 
@@ -2464,7 +2832,7 @@ export function LocalFileRoomPlayer({
   }
 
   function maybeRequestProgressivePrefetch(reason: RangeRequestReason) {
-    if (isHost || !dataChannelRef.current || dataChannelRef.current.readyState !== "open") {
+    if (isHost || isRelayTransportActive || !dataChannelRef.current || dataChannelRef.current.readyState !== "open") {
       return;
     }
 
@@ -2497,7 +2865,7 @@ export function LocalFileRoomPlayer({
   }
 
   function requestTrailingMetadataRange() {
-    if (isHost || room.mediaSource.fileSize <= TRAILING_METADATA_WINDOW_BYTES) {
+    if (isHost || isRelayTransportActive || room.mediaSource.fileSize <= TRAILING_METADATA_WINDOW_BYTES) {
       return;
     }
 
@@ -2512,7 +2880,7 @@ export function LocalFileRoomPlayer({
   }
 
   function requestSpecificRange(startByte: number, endByte: number, reason: RangeRequestReason, targetTime?: number) {
-    if (isHost || !dataChannelRef.current || dataChannelRef.current.readyState !== "open") {
+    if (isHost || isRelayTransportActive || !dataChannelRef.current || dataChannelRef.current.readyState !== "open") {
       return;
     }
 
@@ -2533,7 +2901,10 @@ export function LocalFileRoomPlayer({
       issuedAt: requestIssuedAt
     };
 
-    const effectiveTransferState = lastReportedTransferRef.current ?? room.transferState;
+    const effectiveTransferState = {
+      ...(lastReportedTransferRef.current ?? {}),
+      ...(room.transferState ?? {})
+    } as Partial<TransferState>;
     const nextPhase =
       reason === "initial" || reason === "resume"
         ? "buffering"
@@ -2596,6 +2967,7 @@ export function LocalFileRoomPlayer({
     const bufferedUntilTime = isHost ? Number.POSITIVE_INFINITY : getPlayableBufferedUntil(video);
 
     if (!isHost && !hasCurrentPlayableData(video)) {
+      recordRebufferEvent("play-no-current-data");
       pendingSeekTimeRef.current = video.currentTime;
       updateLocalMessage(`Buffering at ${formatTime(video.currentTime)}`);
       publishTransferState(
@@ -2609,6 +2981,7 @@ export function LocalFileRoomPlayer({
     }
 
     if (bufferedUntilTime !== undefined && video.currentTime >= bufferedUntilTime - 0.25) {
+      recordRebufferEvent("play-near-buffer-edge");
       debugLog(debugRole, "handlePlay requesting more buffer", {
         currentTime: video.currentTime,
         bufferedUntilTime
@@ -2674,6 +3047,7 @@ export function LocalFileRoomPlayer({
         Number.isFinite(video.duration) && video.duration > 0 && video.currentTime >= video.duration - 0.35;
 
       if (reachedBufferedEdge || reachedLocalBlobEnd) {
+        recordRebufferEvent("pause-buffer-underflow");
         pendingSeekTimeRef.current = video.currentTime;
         updateLocalMessage(`Buffering at ${formatTime(video.currentTime)}`);
         publishTransferState(
@@ -2831,6 +3205,18 @@ export function LocalFileRoomPlayer({
     }
 
     setCurrentTime(video.currentTime);
+
+    if (
+      stablePlaybackStartedAtRef.current === null &&
+      !video.paused &&
+      Number.isFinite(video.currentTime) &&
+      video.currentTime >= 1.5
+    ) {
+      stablePlaybackStartedAtRef.current = Date.now();
+      rebufferTimestampsRef.current = [];
+      lowBufferStreakRef.current = 0;
+      lowThroughputSinceRef.current = null;
+    }
 
     if ((isHost || durationRef.current <= 0) && Number.isFinite(video.duration) && video.duration > 0) {
       setDuration(video.duration);
@@ -3293,6 +3679,15 @@ export function LocalFileRoomPlayer({
               {room.transferState.bufferedUntilTime !== undefined ? (
                 <span>Buffered to {formatTime(room.transferState.bufferedUntilTime)}</span>
               ) : null}
+              <span>
+                Chunks out {sentChunkCountRef.current} ({formatByteCount(sentChunkBytesRef.current)})
+              </span>
+              <span>
+                Chunks in {receivedChunkCountRef.current} ({formatByteCount(receivedChunkBytesRef.current)})
+              </span>
+              <span>
+                Relay uploads {relayUploadedChunkCountRef.current} ({formatByteCount(relayUploadedChunkBytesRef.current)})
+              </span>
             </>
           ) : null}
         </div>
@@ -3617,18 +4012,27 @@ export function LocalFileRoomPlayer({
     const video = videoRef.current;
     const bufferedUntilTime =
       overrides.bufferedUntilTime ?? getPlayableBufferedUntil(video) ?? getExpectedBufferedUntil(room.currentTime);
+    const bufferAheadSeconds = overrides.bufferAheadSeconds ?? getBufferedAheadSeconds(video);
     const effectiveTransferState = lastReportedTransferRef.current ?? room.transferState;
 
     return {
       phase,
+      transportMode: overrides.transportMode ?? effectiveTransferState?.transportMode ?? "p2p",
       bytesReceived,
       bytesTotal,
       bytesPersisted,
       progress: bytesTotal > 0 ? bytesPersisted / bytesTotal : 0,
       bufferedUntilTime,
+      bufferAheadSeconds,
       isPlaybackReady: overrides.isPlaybackReady ?? effectiveTransferState?.isPlaybackReady ?? false,
       pendingSeekTime: overrides.pendingSeekTime ?? pendingSeekTimeRef.current,
       reconnectAttempt: overrides.reconnectAttempt ?? (reconnectAttemptRef.current || undefined),
+      transportReason: overrides.transportReason ?? effectiveTransferState?.transportReason,
+      effectiveBitrateBps: overrides.effectiveBitrateBps ?? effectiveTransferState?.effectiveBitrateBps ?? getEffectiveBitrateBps(),
+      measuredGoodputBps:
+        overrides.measuredGoodputBps ?? effectiveTransferState?.measuredGoodputBps ?? measuredGoodputBpsRef.current,
+      relaySessionId: overrides.relaySessionId ?? effectiveTransferState?.relaySessionId,
+      relayPlaybackUrl: overrides.relayPlaybackUrl ?? effectiveTransferState?.relayPlaybackUrl,
       lastRequestedRange: overrides.lastRequestedRange ?? getLastRequestedRange(),
       availableRanges: overrides.availableRanges ?? directTorrentRanges ?? availableRangesRef.current,
       message: overrides.message
@@ -3781,6 +4185,7 @@ export function LocalFileRoomPlayer({
     const bufferedUntilTime = isHost ? Number.POSITIVE_INFINITY : getPlayableBufferedUntil(video);
 
     if (!isHost && !hasCurrentPlayableData(video)) {
+      recordRebufferEvent("request-playback-no-current-data");
       pendingSeekTimeRef.current = video.currentTime;
       updateLocalMessage(`Buffering at ${formatTime(video.currentTime)}`);
       publishTransferState(
@@ -3794,6 +4199,7 @@ export function LocalFileRoomPlayer({
     }
 
     if (bufferedUntilTime !== undefined && video.currentTime >= bufferedUntilTime - 0.25) {
+      recordRebufferEvent("request-playback-near-buffer-edge");
       suppressNextLocalPauseEventRef.current = true;
       forwardNextLocalPauseEventRef.current = false;
       video.pause();

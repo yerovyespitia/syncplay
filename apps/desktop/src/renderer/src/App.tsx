@@ -236,6 +236,7 @@ export default function App() {
     sendChatMessage,
     updateTransferState,
     updateSubtitleTrack,
+    startRelayFallback,
     sendPeerOffer,
     sendPeerAnswer,
     sendPeerIceCandidate,
@@ -1081,6 +1082,7 @@ export default function App() {
           onPeerIceCandidate={sendPeerIceCandidate}
           onTransferState={updateTransferState}
           onSubtitleTrackChange={updateSubtitleTrack}
+          onStartRelayFallback={startRelayFallback}
         />
       )}
 

@@ -181,6 +181,85 @@ describe("syncplay server chat", () => {
     const errorEvent = await host.nextEvent("server_error");
     expect(errorEvent.payload.message).toBe("Missing torrent magnet metadata.");
   });
+
+  test("creates a relay session when a guest requests fallback for a local file room", async () => {
+    const host = await openSocket(server.port, sockets);
+    const guest = await openSocket(server.port, sockets);
+    const created = await createLocalRoom(host, "Alice");
+    await host.nextEvent("chat_message_received");
+    await joinRoom(guest, created.payload.room.roomId, "Bob");
+    await host.nextEvent("chat_message_received");
+    await guest.nextEvent("chat_message_received");
+    host.clear();
+    guest.clear();
+
+    guest.send({
+      type: "start_relay_fallback",
+      payload: {
+        roomId: created.payload.room.roomId,
+        reason: "low_throughput"
+      }
+    });
+
+    const hostEvent = await host.nextEvent("relay_session_ready");
+    const guestEvent = await guest.nextEvent("relay_session_ready");
+
+    expect(hostEvent.payload.room.transferState?.transportMode).toBe("relay_http");
+    expect(hostEvent.payload.room.transferState?.relaySessionId).toBeTruthy();
+    expect(hostEvent.payload.room.transferState?.relayPlaybackUrl).toContain("/api/local-media/sessions/");
+    expect(guestEvent.payload.room.transferState?.relaySessionId).toBe(hostEvent.payload.room.transferState?.relaySessionId);
+  });
+
+  test("uploads relay bytes and serves them over HTTP range requests", async () => {
+    const host = await openSocket(server.port, sockets);
+    const created = await createLocalRoom(host, "Alice");
+    await host.nextEvent("chat_message_received");
+    const relayResponse = await fetch(`http://127.0.0.1:${server.port}/api/local-media/sessions`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        roomId: created.payload.room.roomId
+      })
+    });
+    expect(relayResponse.status).toBe(200);
+    const relaySession = (await relayResponse.json()) as {
+      sessionId: string;
+      uploadUrl: string;
+      playbackUrl: string;
+    };
+    const uploadBytes = new TextEncoder().encode("hello relay");
+    const uploadResponse = await fetch(`http://127.0.0.1:${server.port}${relaySession.uploadUrl}`, {
+      method: "PUT",
+      headers: {
+        "content-type": "application/octet-stream",
+        "x-start-byte": "0",
+        "x-end-byte": String(uploadBytes.byteLength)
+      },
+      body: uploadBytes
+    });
+    expect(uploadResponse.status).toBe(200);
+
+    const playbackResponse = await fetch(`http://127.0.0.1:${server.port}${relaySession.playbackUrl}`, {
+      headers: {
+        range: "bytes=0-4"
+      }
+    });
+    expect(playbackResponse.status).toBe(206);
+    expect(await playbackResponse.text()).toBe("hello");
+
+    const statusResponse = await fetch(
+      `http://127.0.0.1:${server.port}/api/local-media/sessions/${encodeURIComponent(relaySession.sessionId)}/status`
+    );
+    expect(statusResponse.status).toBe(200);
+    const status = (await statusResponse.json()) as {
+      contiguousBytes: number;
+      largestRequestedEndByte: number;
+    };
+    expect(status.contiguousBytes).toBe(uploadBytes.byteLength);
+    expect(status.largestRequestedEndByte).toBeGreaterThanOrEqual(5);
+  });
 });
 
 async function createRoom(socket: TestSocket, displayName: string) {
@@ -190,6 +269,25 @@ async function createRoom(socket: TestSocket, displayName: string) {
       mediaSource: {
         type: "youtube",
         videoId: "abc123"
+      },
+      displayName
+    }
+  });
+
+  return socket.nextEvent("room_created");
+}
+
+async function createLocalRoom(socket: TestSocket, displayName: string) {
+  socket.send({
+    type: "create_room",
+    payload: {
+      mediaSource: {
+        type: "local_file",
+        mediaId: "media-local-1",
+        fileName: "sample.mp4",
+        fileSize: 32,
+        mimeType: "video/mp4",
+        duration: 12
       },
       displayName
     }

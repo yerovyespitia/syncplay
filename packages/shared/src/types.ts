@@ -1,4 +1,6 @@
 export type PlaybackState = "playing" | "paused";
+export type MediaTransportMode = "p2p" | "relay_http";
+export type MediaTransportReason = "initial" | "low_throughput" | "buffer_instability" | "manual_resync";
 
 export type TransferPhase =
   | "waiting_host"
@@ -63,14 +65,21 @@ export type MediaSource = YoutubeMediaSource | HostedFileMediaSource;
 
 export interface TransferState {
   phase: TransferPhase;
+  transportMode: MediaTransportMode;
   bytesReceived: number;
   bytesTotal: number;
   bytesPersisted: number;
   progress: number;
   bufferedUntilTime?: number;
+  bufferAheadSeconds?: number;
   isPlaybackReady: boolean;
   pendingSeekTime?: number;
   reconnectAttempt?: number;
+  transportReason?: MediaTransportReason;
+  effectiveBitrateBps?: number;
+  measuredGoodputBps?: number;
+  relaySessionId?: string;
+  relayPlaybackUrl?: string;
   lastRequestedRange?: ByteRange;
   availableRanges: ByteRange[];
   message?: string;
@@ -162,6 +171,13 @@ export type ClientEvent =
       };
     }
   | {
+      type: "start_relay_fallback";
+      payload: {
+        roomId: string;
+        reason: Exclude<MediaTransportReason, "initial">;
+      };
+    }
+  | {
       type: "peer_offer";
       payload: {
         roomId: string;
@@ -243,6 +259,19 @@ export type ServerEvent =
       type: "chat_message_received";
       payload: {
         message: ChatMessage;
+      };
+    }
+  | {
+      type: "relay_session_ready";
+      payload: {
+        room: RoomState;
+      };
+    }
+  | {
+      type: "relay_session_failed";
+      payload: {
+        room: RoomState;
+        message: string;
       };
     }
   | {

@@ -41,11 +41,13 @@ export class RoomManager {
       transferState:
         mediaSource.type === "local_file" || mediaSource.type === "torrent_magnet"
           ? {
-              phase: "waiting_host",
+            phase: "waiting_host",
+              transportMode: "p2p",
               bytesReceived: 0,
               bytesTotal: mediaSource.fileSize,
               bytesPersisted: 0,
               progress: 0,
+              transportReason: "initial",
               isPlaybackReady: false,
               availableRanges: []
             }
@@ -95,10 +97,16 @@ export class RoomManager {
       nextState.lastEventId += 1;
       nextState.transferState = {
         phase: "connecting_peer",
+        transportMode: nextState.transferState?.transportMode ?? "p2p",
         bytesReceived: 0,
         bytesTotal: nextState.mediaSource.fileSize,
         bytesPersisted: 0,
         progress: 0,
+        transportReason: nextState.transferState?.transportReason ?? "initial",
+        effectiveBitrateBps: nextState.transferState?.effectiveBitrateBps,
+        measuredGoodputBps: nextState.transferState?.measuredGoodputBps,
+        relaySessionId: nextState.transferState?.relaySessionId,
+        relayPlaybackUrl: nextState.transferState?.relayPlaybackUrl,
         isPlaybackReady: false,
         availableRanges: []
       };
@@ -267,6 +275,47 @@ export class RoomManager {
       currentTime: shouldStartFromBeginning ? 0 : nextState.currentTime,
       lastEventId: shouldStartFromBeginning ? nextState.lastEventId + 1 : nextState.lastEventId,
       transferState,
+      updatedAt: Date.now(),
+      participants: Array.from(record.participants.values())
+    };
+
+    return record.state;
+  }
+
+  patchTransferState(roomId: string, transferStatePatch: Partial<TransferState>) {
+    const record = this.rooms.get(normalizeRoomId(roomId));
+
+    if (!record) {
+      return null;
+    }
+
+    const nextState = advanceRoomPlayback(record.state);
+    const baseTransferState =
+      nextState.transferState ??
+      (nextState.mediaSource.type === "local_file" || nextState.mediaSource.type === "torrent_magnet"
+        ? {
+            phase: "waiting_host",
+            transportMode: "p2p" as const,
+            bytesReceived: 0,
+            bytesTotal: nextState.mediaSource.fileSize,
+            bytesPersisted: 0,
+            progress: 0,
+            transportReason: "initial" as const,
+            isPlaybackReady: false,
+            availableRanges: []
+          }
+        : null);
+
+    if (!baseTransferState) {
+      return null;
+    }
+
+    record.state = {
+      ...nextState,
+      transferState: {
+        ...baseTransferState,
+        ...transferStatePatch
+      },
       updatedAt: Date.now(),
       participants: Array.from(record.participants.values())
     };

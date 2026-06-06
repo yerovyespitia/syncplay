@@ -151,9 +151,15 @@ export function useRoomConnection() {
       case "transfer_state_updated":
       case "local_file_ready":
       case "local_file_buffering":
+      case "relay_session_ready":
       case "subtitle_track_updated":
         roomRef.current = event.payload.room;
         setRoom(event.payload.room);
+        return;
+      case "relay_session_failed":
+        roomRef.current = event.payload.room;
+        setRoom(event.payload.room);
+        setError(event.payload.message);
         return;
       case "sync_snapshot":
         roomRef.current = event.payload.room;
@@ -497,6 +503,25 @@ export function useRoomConnection() {
     [send]
   );
 
+  const startRelayFallback = useCallback(
+    (reason: "low_throughput" | "buffer_instability" | "manual_resync") => {
+      const currentRoom = roomRef.current;
+
+      if (!currentRoom) {
+        return;
+      }
+
+      send({
+        type: "start_relay_fallback",
+        payload: {
+          roomId: currentRoom.roomId,
+          reason
+        }
+      });
+    },
+    [send]
+  );
+
   const participants = useMemo<Participant[]>(() => room?.participants ?? [], [room]);
 
   return {
@@ -519,6 +544,7 @@ export function useRoomConnection() {
     sendChatMessage,
     updateTransferState,
     updateSubtitleTrack,
+    startRelayFallback,
     sendPeerOffer,
     sendPeerAnswer,
     sendPeerIceCandidate,

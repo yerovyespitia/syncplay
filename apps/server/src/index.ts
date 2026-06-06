@@ -1,4 +1,4 @@
-import type { ChatMessage, ClientEvent, Participant, ServerEnvelope, TransferState } from "@syncplay/shared";
+import type { ChatMessage, ClientEvent, HostedFileMediaSource, Participant, ServerEnvelope, TransferState } from "@syncplay/shared";
 import { normalizeRoomId } from "@syncplay/shared";
 
 import {
@@ -11,6 +11,12 @@ import {
   normalizeChatMessageText,
   resolveParticipantName
 } from "./chat";
+import {
+  LocalMediaRelayManager,
+  buildPlaybackPath,
+  buildUploadPath,
+  parseRangeHeader
+} from "./local-media-relay";
 import { RoomManager } from "./room-manager";
 
 type SocketData = {
@@ -33,7 +39,8 @@ const clientEventTypes = new Set<ClientEvent["type"]>([
   "peer_answer",
   "peer_ice_candidate",
   "peer_transfer_state",
-  "update_subtitle_track"
+  "update_subtitle_track",
+  "start_relay_fallback"
 ]);
 
 function hasValidTorrentMediaSource(
@@ -56,14 +63,19 @@ function hasValidTorrentMediaSource(
 export function createSyncPlayServer(port = Number(process.env.PORT ?? 8787)) {
   const roomManager = new RoomManager();
   const roomMembers = new Map<string, Set<Bun.ServerWebSocket<SocketData>>>();
+  const relayManager = new LocalMediaRelayManager();
 
   const server = Bun.serve<SocketData>({
     port,
-    fetch(request, serverRef) {
+    async fetch(request, serverRef) {
       const { pathname } = new URL(request.url);
 
       if (pathname === "/health") {
         return Response.json({ ok: true });
+      }
+
+      if (pathname.startsWith("/api/local-media/")) {
+        return handleRelayRequest(request);
       }
 
       if (pathname === "/ws") {
@@ -111,6 +123,7 @@ export function createSyncPlayServer(port = Number(process.env.PORT ?? 8787)) {
         }
 
         if (result.hostDisconnected) {
+          void relayManager.destroySessionsForRoom(result.room.roomId);
           broadcast(result.room.roomId, {
             type: "host_disconnected",
             payload: {
@@ -131,6 +144,8 @@ export function createSyncPlayServer(port = Number(process.env.PORT ?? 8787)) {
           if (leavingParticipant) {
             broadcastChatMessage(result.room.roomId, createSystemChatMessage(roomId, leavingParticipant, buildLeaveMessage(leavingParticipant)));
           }
+        } else {
+          void relayManager.destroySessionsForRoom(result.room.roomId);
         }
       }
     }
@@ -246,6 +261,7 @@ export function createSyncPlayServer(port = Number(process.env.PORT ?? 8787)) {
         }
 
         if (result.hostDisconnected) {
+          void relayManager.destroySessionsForRoom(result.room.roomId);
           broadcast(result.room.roomId, {
             type: "host_disconnected",
             payload: {
@@ -266,6 +282,8 @@ export function createSyncPlayServer(port = Number(process.env.PORT ?? 8787)) {
           if (leavingParticipant) {
             broadcastChatMessage(result.room.roomId, createSystemChatMessage(roomId, leavingParticipant, buildLeaveMessage(leavingParticipant)));
           }
+        } else {
+          void relayManager.destroySessionsForRoom(result.room.roomId);
         }
 
         return;
@@ -402,6 +420,47 @@ export function createSyncPlayServer(port = Number(process.env.PORT ?? 8787)) {
         return;
       }
 
+      case "start_relay_fallback": {
+        const room = roomManager.getRoom(event.payload.roomId);
+
+        if (!room || room.mediaSource.type !== "local_file") {
+          sendError(ws, "Room not found.");
+          return;
+        }
+
+        void createRelaySessionForRoom(room.roomId, room.mediaSource, event.payload.reason)
+          .then((nextRoom) => {
+            broadcast(nextRoom.roomId, {
+              type: "transfer_state_updated",
+              payload: { room: nextRoom }
+            });
+            broadcast(nextRoom.roomId, {
+              type: "relay_session_ready",
+              payload: { room: nextRoom }
+            });
+          })
+          .catch((error: unknown) => {
+            const failedRoom =
+              roomManager.patchTransferState(room.roomId, {
+                transportMode: "p2p",
+                transportReason: event.payload.reason,
+                message: "Relay unavailable, retrying direct transfer"
+              }) ?? room;
+            broadcast(failedRoom.roomId, {
+              type: "transfer_state_updated",
+              payload: { room: failedRoom }
+            });
+            broadcast(failedRoom.roomId, {
+              type: "relay_session_failed",
+              payload: {
+                room: failedRoom,
+                message: error instanceof Error ? error.message : "Relay session could not be created."
+              }
+            });
+          });
+        return;
+      }
+
       case "update_subtitle_track": {
         const room = roomManager.updateSubtitleTrack(event.payload.roomId, event.payload.subtitleTrack);
 
@@ -426,6 +485,154 @@ export function createSyncPlayServer(port = Number(process.env.PORT ?? 8787)) {
         return;
       }
     }
+  }
+
+  async function handleRelayRequest(request: Request) {
+    const url = new URL(request.url);
+    const segments = url.pathname.split("/").filter(Boolean);
+
+    if (segments[2] === "sessions" && segments.length === 3 && request.method === "POST") {
+      const body = (await request.json().catch(() => null)) as { roomId?: string } | null;
+      const room = body?.roomId ? roomManager.getRoom(body.roomId) : null;
+
+      if (!room || room.mediaSource.type !== "local_file") {
+        return Response.json({ message: "Room not found." }, { status: 404 });
+      }
+
+      const relaySession = await relayManager.createOrReuseSession(room.roomId, room.mediaSource);
+      return Response.json(buildRelaySessionPayload(relaySession));
+    }
+
+    if (segments[2] !== "sessions" || !segments[3]) {
+      return new Response("Not found", { status: 404 });
+    }
+
+    const sessionId = decodeURIComponent(segments[3]);
+    const session = relayManager.getSession(sessionId);
+
+    if (!session) {
+      return Response.json({ message: "Relay session not found." }, { status: 404 });
+    }
+
+    if (segments.length === 4 && request.method === "DELETE") {
+      await relayManager.destroySession(sessionId);
+      return new Response(null, { status: 204 });
+    }
+
+    if (segments.length === 5 && segments[4] === "status" && request.method === "GET") {
+      return Response.json(buildRelayStatusPayload(session));
+    }
+
+    if (segments.length === 5 && segments[4] === "ranges" && request.method === "PUT") {
+      const startByte = Number(request.headers.get("x-start-byte"));
+      const endByte = Number(request.headers.get("x-end-byte"));
+
+      if (!Number.isFinite(startByte) || !Number.isFinite(endByte)) {
+        return Response.json({ message: "Invalid relay byte range headers." }, { status: 400 });
+      }
+
+      const bytes = new Uint8Array(await request.arrayBuffer());
+      const updatedSession = await relayManager.writeRange(sessionId, startByte, endByte, bytes);
+      return Response.json(buildRelayStatusPayload(updatedSession));
+    }
+
+    if (segments.length >= 5 && (request.method === "GET" || request.method === "HEAD")) {
+      const parsedRange =
+        request.headers.get("range") === null
+          ? {
+              startByte: 0,
+              endByte: session.fileSize
+            }
+          : parseRangeHeader(request.headers.get("range"), session.fileSize);
+
+      if (!parsedRange) {
+        return new Response("Invalid byte range.", {
+          status: 416,
+          headers: {
+            "Content-Range": `bytes */${session.fileSize}`
+          }
+        });
+      }
+
+      relayManager.noteRequestedRange(sessionId, parsedRange.startByte, parsedRange.endByte);
+      const contentLength = parsedRange.endByte - parsedRange.startByte;
+      const hasRangeRequest = request.headers.get("range") !== null;
+      const headers = new Headers({
+        "Accept-Ranges": "bytes",
+        "Cache-Control": "no-store",
+        "Content-Length": String(contentLength),
+        "Content-Type": session.mimeType
+      });
+
+      if (hasRangeRequest) {
+        headers.set("Content-Range", `bytes ${parsedRange.startByte}-${parsedRange.endByte - 1}/${session.fileSize}`);
+      }
+
+      if (request.method === "HEAD") {
+        return new Response(null, {
+          status: hasRangeRequest ? 206 : 200,
+          headers
+        });
+      }
+
+      try {
+        const bytes = await relayManager.readRange(sessionId, parsedRange.startByte, parsedRange.endByte);
+        return new Response(bytes, {
+          status: hasRangeRequest ? 206 : 200,
+          headers
+        });
+      } catch (error) {
+        return Response.json(
+          { message: error instanceof Error ? error.message : "Requested media file is not available yet." },
+          { status: 503 }
+        );
+      }
+    }
+
+    return new Response("Not found", { status: 404 });
+  }
+
+  async function createRelaySessionForRoom(
+    roomId: string,
+    mediaSource: HostedFileMediaSource,
+    reason: Extract<ClientEvent, { type: "start_relay_fallback" }>["payload"]["reason"]
+  ) {
+    const relaySession = await relayManager.createOrReuseSession(roomId, mediaSource);
+    const nextRoom = roomManager.patchTransferState(roomId, {
+      transportMode: "relay_http",
+      transportReason: reason,
+      relaySessionId: relaySession.sessionId,
+      relayPlaybackUrl: buildPlaybackPath(relaySession.sessionId, relaySession.fileName),
+      message: "Switching to optimized relay"
+    });
+
+    if (!nextRoom) {
+      throw new Error("Room not found.");
+    }
+
+    return nextRoom;
+  }
+
+  function buildRelaySessionPayload(session: ReturnType<LocalMediaRelayManager["getSession"]> extends infer T ? NonNullable<T> : never) {
+    return {
+      sessionId: session.sessionId,
+      roomId: session.roomId,
+      mediaId: session.mediaId,
+      uploadUrl: buildUploadPath(session.sessionId),
+      playbackUrl: buildPlaybackPath(session.sessionId, session.fileName),
+      expiresAt: session.expiresAt
+    };
+  }
+
+  function buildRelayStatusPayload(session: ReturnType<LocalMediaRelayManager["getSession"]> extends infer T ? NonNullable<T> : never) {
+    return {
+      sessionId: session.sessionId,
+      availableRanges: session.availableRanges,
+      contiguousBytes: session.contiguousBytes,
+      uploadedBytes: session.uploadedBytes,
+      largestRequestedEndByte: session.largestRequestedEndByte,
+      expiresAt: session.expiresAt
+    };
   }
 
   function createSystemChatMessage(roomId: string, participant: Participant, text: string) {
