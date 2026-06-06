@@ -17,6 +17,7 @@ import {
 } from "./lib/torrentSessionProvider";
 
 type SourceOption = "youtube" | "local_file" | "torrent_magnet";
+const LOCAL_FILE_SOURCE_ENABLED = false;
 
 function createFallbackTorrentSession(magnetUri: string, message: string): TorrentSessionSummary {
   return {
@@ -274,7 +275,7 @@ export default function App() {
       ? Boolean(parsedVideo)
       : sourceOption === "torrent_magnet"
         ? !shouldBlockSafariMagnetFlow && selectedLocalFile?.type === "torrent_magnet"
-        : selectedLocalFile?.type === "local_file";
+        : LOCAL_FILE_SOURCE_ENABLED && selectedLocalFile?.type === "local_file";
   const canJoinRoom = Boolean(roomCode.trim());
 
   function setIsolatedTorrentSessionsPreference(nextValue: boolean) {
@@ -300,6 +301,14 @@ export default function App() {
   }
 
   async function switchSourceOption(nextSourceOption: SourceOption) {
+    if (!LOCAL_FILE_SOURCE_ENABLED && nextSourceOption === "local_file") {
+      setSourceOption("youtube");
+      setSelectedLocalFile(null);
+      setSelectedPlaybackFile(null);
+      setLocalError(null);
+      return;
+    }
+
     if (nextSourceOption !== "torrent_magnet") {
       await disposeActiveTorrentSession();
     }
@@ -682,7 +691,12 @@ export default function App() {
     }
 
     if (!selectedLocalFile) {
-      setLocalError("Choose a local video file first.");
+      setLocalError("Local file rooms are temporarily unavailable.");
+      return;
+    }
+
+    if (!LOCAL_FILE_SOURCE_ENABLED) {
+      setLocalError("Local file rooms are temporarily unavailable.");
       return;
     }
 
@@ -827,7 +841,7 @@ export default function App() {
             <div className="hero-copy">
               <h1>Watch anything together, in sync.</h1>
               <p className="hero-text">
-                Share a room code and play from YouTube, a local file, or a magnet link — everyone stays in perfect sync.
+                Share a room code and play from YouTube or a magnet link while everyone stays in perfect sync.
               </p>
             </div>
             <div className="hero-alias">
@@ -860,15 +874,17 @@ export default function App() {
                 >
                   YouTube
                 </button>
-                <button
-                  className={`source-chip ${sourceOption === "local_file" ? "source-chip--active" : ""}`}
-                  onClick={() => {
-                    void switchSourceOption("local_file");
-                  }}
-                  type="button"
-                >
-                  Local File
-                </button>
+                {LOCAL_FILE_SOURCE_ENABLED ? (
+                  <button
+                    className={`source-chip ${sourceOption === "local_file" ? "source-chip--active" : ""}`}
+                    onClick={() => {
+                      void switchSourceOption("local_file");
+                    }}
+                    type="button"
+                  >
+                    Local File
+                  </button>
+                ) : null}
                 <button
                   className={`source-chip ${sourceOption === "torrent_magnet" ? "source-chip--active" : ""}`}
                   onClick={() => {
@@ -899,7 +915,7 @@ export default function App() {
                     Some YouTube videos may fail in rooms because of country restrictions, age/account limits, or embed permissions controlled by YouTube.
                   </p>
                 </>
-              ) : sourceOption === "local_file" ? (
+              ) : sourceOption === "local_file" && LOCAL_FILE_SOURCE_ENABLED ? (
                 <>
                   <label className="input-label" htmlFor="local-file">
                     Local video
@@ -1046,7 +1062,7 @@ export default function App() {
                 placeholder="AB12CD"
                 maxLength={6}
               />
-              <p className="helper-text">Use the room code whether the host chose YouTube or a local file.</p>
+              <p className="helper-text">Use the room code whether the host chose YouTube or a magnet link.</p>
               <button className="secondary-button" type="button" onClick={handleJoinRoom} disabled={!canJoinRoom}>
                 Join room
               </button>
