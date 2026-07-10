@@ -18,11 +18,17 @@ import {
   parseRangeHeader
 } from "./local-media-relay";
 import { RoomManager } from "./room-manager";
+import { ProgressivePenaltyLimiter, TokenBucketRateLimiter } from "./rate-limit";
 
 type SocketData = {
   participantId: string;
   roomId?: string;
+  clientKey: string;
+  chatRateLimiter: TokenBucketRateLimiter;
 };
+
+const CHAT_RATE_LIMIT_BURST = 6;
+const CHAT_RATE_LIMIT_REFILL_PER_SECOND = 0.5;
 
 type SyncPlayServer = ReturnType<typeof Bun.serve<SocketData>>;
 
@@ -64,6 +70,7 @@ export function createSyncPlayServer(port = Number(process.env.PORT ?? 8787)) {
   const roomManager = new RoomManager();
   const roomMembers = new Map<string, Set<Bun.ServerWebSocket<SocketData>>>();
   const relayManager = new LocalMediaRelayManager();
+  const chatPenaltyLimiter = new ProgressivePenaltyLimiter();
 
   const server = Bun.serve<SocketData>({
     port,
@@ -80,9 +87,12 @@ export function createSyncPlayServer(port = Number(process.env.PORT ?? 8787)) {
 
       if (pathname === "/ws") {
         const participantId = crypto.randomUUID();
+        const clientKey = serverRef.requestIP(request)?.address ?? participantId;
         const upgraded = serverRef.upgrade(request, {
           data: {
-            participantId
+            participantId,
+            clientKey,
+            chatRateLimiter: new TokenBucketRateLimiter(CHAT_RATE_LIMIT_BURST, CHAT_RATE_LIMIT_REFILL_PER_SECOND)
           }
         });
 
@@ -294,6 +304,21 @@ export function createSyncPlayServer(port = Number(process.env.PORT ?? 8787)) {
 
         if (!text) {
           sendError(ws, "Message cannot be empty.");
+          return;
+        }
+
+        const remainingPenaltySeconds = chatPenaltyLimiter.getRemainingPenaltySeconds(ws.data.clientKey);
+
+        if (remainingPenaltySeconds > 0) {
+          sendError(ws, `You're sending messages too quickly. Try again in ${remainingPenaltySeconds} second${remainingPenaltySeconds === 1 ? "" : "s"}.`);
+          return;
+        }
+
+        const rateLimit = ws.data.chatRateLimiter.consume();
+
+        if (!rateLimit.allowed) {
+          const penaltySeconds = chatPenaltyLimiter.registerViolation(ws.data.clientKey);
+          sendError(ws, `You're sending messages too quickly. Try again in ${penaltySeconds} second${penaltySeconds === 1 ? "" : "s"}.`);
           return;
         }
 

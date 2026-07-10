@@ -15,6 +15,17 @@ import { getWebSocketUrl } from "../lib/config";
 
 type ConnectionStatus = "connecting" | "connected" | "disconnected";
 
+const CHAT_RATE_LIMIT_ERROR_PREFIX = "You're sending messages too quickly. Try again in ";
+
+function getChatRateLimitRetrySeconds(message: string) {
+  const match = new RegExp(`^${CHAT_RATE_LIMIT_ERROR_PREFIX}(\\d+) second(?:s)?\\.$`).exec(message);
+  return match ? Number(match[1]) : null;
+}
+
+function buildChatRateLimitError(remainingSeconds: number) {
+  return `${CHAT_RATE_LIMIT_ERROR_PREFIX}${remainingSeconds} second${remainingSeconds === 1 ? "" : "s"}.`;
+}
+
 export interface DebugEntry {
   id: string;
   scope: "socket" | "server" | "client" | "youtube" | "local";
@@ -79,6 +90,7 @@ export function useRoomConnection() {
   const [remoteCommand, setRemoteCommand] = useState<RemotePlaybackCommand | null>(null);
   const [peerSignal, setPeerSignal] = useState<PeerSignal | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [chatRateLimitEndsAt, setChatRateLimitEndsAt] = useState<number | null>(null);
   const [selfId, setSelfId] = useState<string | null>(null);
   const [lastActionLabel, setLastActionLabel] = useState("Ready");
   const [displayName, setDisplayNameState] = useState(buildGuestName);
@@ -87,6 +99,7 @@ export function useRoomConnection() {
   const pendingMessagesRef = useRef<ClientEnvelope[]>([]);
   const displayNameRef = useRef(displayName);
   const roomRef = useRef<RoomState | null>(null);
+  const selfIdRef = useRef<string | null>(null);
   const pendingLeaveRoomIdRef = useRef<string | null>(null);
 
   const pushDebugEntry = useCallback((entry: Omit<DebugEntry, "id" | "timestamp">) => {
@@ -118,6 +131,7 @@ export function useRoomConnection() {
       case "room_joined":
         roomRef.current = event.payload.room;
         pendingLeaveRoomIdRef.current = null;
+        selfIdRef.current = event.payload.selfId;
         setSelfId(event.payload.selfId);
         setRoom(event.payload.room);
         setLastActionLabel(`Joined room ${event.payload.room.roomId}`);
@@ -129,6 +143,10 @@ export function useRoomConnection() {
         setLastActionLabel(`${event.payload.room.participants.length} participant(s) connected`);
         return;
       case "chat_message_received":
+        if (event.payload.message.senderParticipantId === selfIdRef.current) {
+          setChatRateLimitEndsAt(null);
+          setError((current) => current?.startsWith(CHAT_RATE_LIMIT_ERROR_PREFIX) ? null : current);
+        }
         setRoom((current) => {
           if (!current || current.roomId !== event.payload.message.roomId) {
             return current;
@@ -217,11 +235,42 @@ export function useRoomConnection() {
           return;
         }
 
+        const retryAfterSeconds = getChatRateLimitRetrySeconds(event.payload.message);
+
+        if (retryAfterSeconds !== null) {
+          setChatRateLimitEndsAt(Date.now() + retryAfterSeconds * 1_000);
+          setError(buildChatRateLimitError(retryAfterSeconds));
+          return;
+        }
+
         setError(event.payload.message);
         return;
       }
     }
   }, [pushDebugEntry]);
+
+  useEffect(() => {
+    if (chatRateLimitEndsAt === null) {
+      return;
+    }
+
+    const updateCountdown = () => {
+      const remainingSeconds = Math.ceil((chatRateLimitEndsAt - Date.now()) / 1_000);
+
+      if (remainingSeconds <= 0) {
+        setChatRateLimitEndsAt(null);
+        setError((current) => current?.startsWith(CHAT_RATE_LIMIT_ERROR_PREFIX) ? null : current);
+        return;
+      }
+
+      setError(buildChatRateLimitError(remainingSeconds));
+    };
+
+    updateCountdown();
+    const interval = window.setInterval(updateCountdown, 250);
+
+    return () => window.clearInterval(interval);
+  }, [chatRateLimitEndsAt]);
 
   const connect = useCallback(() => {
     const existing = socketRef.current;
@@ -240,6 +289,7 @@ export function useRoomConnection() {
 
     socket.addEventListener("open", () => {
       setConnectionStatus("connected");
+      setChatRateLimitEndsAt(null);
       setError(null);
       pushDebugEntry({
         scope: "socket",

@@ -45,6 +45,22 @@ describe("syncplay server chat", () => {
     expect(errorEvent.payload.message).toBe("Message cannot be empty.");
   });
 
+  test("limits sustained chat spam while allowing a short burst", async () => {
+    const host = await openSocket(server.port, sockets);
+    const created = await createRoom(host, "Alice");
+    await host.nextEvent("chat_message_received");
+
+    for (let index = 0; index < 7; index += 1) {
+      host.send({
+        type: "send_chat_message",
+        payload: { roomId: created.payload.room.roomId, text: `Message ${index}` }
+      });
+    }
+
+    const errorEvent = await host.nextEvent("server_error");
+    expect(errorEvent.payload.message).toBe("You're sending messages too quickly. Try again in 5 seconds.");
+  });
+
   test("emits a system message when a participant joins", async () => {
     const host = await openSocket(server.port, sockets);
     const guest = await openSocket(server.port, sockets);
