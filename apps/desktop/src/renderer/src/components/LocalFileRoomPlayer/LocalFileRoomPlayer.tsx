@@ -14,7 +14,9 @@ import {
   isWebTorrentSelectedFile,
   type SelectedTorrentFileSource
 } from "../../lib/torrentSessionProvider";
+import type { PeerSignal, PeerSignalListener } from "../../hooks/useRoomConnection";
 import { getServerBaseUrl } from "../../lib/config";
+import { loadIceServers } from "../../lib/ice-servers";
 import { VideoPlayer } from "../VideoPlayer/VideoPlayer";
 import "./LocalFileRoomPlayer.css";
 
@@ -33,29 +35,6 @@ type RemotePlaybackCommand =
       receivedAt: number;
     };
 
-type PeerSignal =
-  | {
-      type: "peer_offer";
-      roomId: string;
-      sourceParticipantId: string;
-      sdp: RTCSessionDescriptionInit;
-      receivedAt: number;
-    }
-  | {
-      type: "peer_answer";
-      roomId: string;
-      sourceParticipantId: string;
-      sdp: RTCSessionDescriptionInit;
-      receivedAt: number;
-    }
-  | {
-      type: "peer_ice_candidate";
-      roomId: string;
-      sourceParticipantId: string;
-      candidate: RTCIceCandidateInit;
-      receivedAt: number;
-    };
-
 interface LocalFileRoomPlayerProps {
   room: RoomState & { mediaSource: HostedFileMediaSource };
   selfId: string | null;
@@ -66,22 +45,25 @@ interface LocalFileRoomPlayerProps {
   showLoadingOverlay?: boolean;
   loadingPercent?: number;
   remoteCommand: RemotePlaybackCommand | null;
-  peerSignal: PeerSignal | null;
+  subscribeToPeerSignals: (listener: PeerSignalListener) => () => void;
   onDebug?: (entry: { scope: "local"; message: string; details?: string }) => void;
   onPlay: (currentTime: number) => void;
   onPause: (currentTime: number) => void;
   onSeek: (currentTime: number) => void;
   onRequestSync: () => void;
-  onPeerOffer: (targetParticipantId: string, sdp: RTCSessionDescriptionInit) => void;
-  onPeerAnswer: (targetParticipantId: string, sdp: RTCSessionDescriptionInit) => void;
-  onPeerIceCandidate: (targetParticipantId: string, candidate: RTCIceCandidateInit) => void;
+  onPeerOffer: (targetParticipantId: string, sdp: RTCSessionDescriptionInit, lane?: number) => void;
+  onPeerAnswer: (targetParticipantId: string, sdp: RTCSessionDescriptionInit, lane?: number) => void;
+  onPeerIceCandidate: (targetParticipantId: string, candidate: RTCIceCandidateInit, lane?: number) => void;
   onTheaterModeChange: (isTheaterMode: boolean) => void;
   onTransferState: (transferState: TransferState) => void;
   onSubtitleTrackChange: (subtitleTrack: SubtitleTrack) => void;
   onStartRelayFallback: (reason: "low_throughput" | "buffer_instability" | "manual_resync") => void;
 }
 
-const CHUNK_SIZE = 128 * 1024;
+// Chromium caps SCTP messages at 256 KiB; each binary message is an 8-byte
+// startByte header followed by the payload.
+const MAX_DATA_CHANNEL_MESSAGE_BYTES = 256 * 1024;
+const CHUNK_HEADER_BYTES = 8;
 const REQUEST_WINDOW_BYTES = 8 * 1024 * 1024;
 const MIN_PROGRESSIVE_START_BYTES = 8 * 1024 * 1024;
 const MAX_PROGRESSIVE_START_BYTES = 32 * 1024 * 1024;
@@ -94,6 +76,22 @@ const STREAMING_PREFETCH_TARGET_SECONDS = 14;
 const LOW_BUFFER_AHEAD_SECONDS = 6;
 const SEEK_RESUME_PADDING_SECONDS = 2;
 const MAX_PREFETCH_INFLIGHT_REQUESTS = 4;
+// The file travels over several independent peer connections ("lanes"). Each
+// has its own SCTP congestion window, so together they recover from loss and
+// latency much faster than one connection (see scripts/bench-transfer).
+const PEER_LANE_COUNT = 4;
+const MAX_INFLIGHT_REQUESTS_PER_LANE = 2;
+// Smaller windows let one seek window spread across every lane.
+const LANE_REQUEST_WINDOW_BYTES = Math.max(2 * 1024 * 1024, Math.floor(REQUEST_WINDOW_BYTES / PEER_LANE_COUNT));
+// A lane that hasn't connected by then is torn down and retried, so a long
+// network outage can't leave the room stuck on a dead connection attempt.
+const PEER_CONNECT_TIMEOUT_MS = 10_000;
+const PEER_RECONNECT_DELAY_MS = 600;
+// A lane that delivers nothing for this long while others do is treated as
+// stuck (e.g. SCTP backing off after a loss burst); its requests move to the
+// healthy lanes so it can't hold back the bytes playback is waiting for.
+const LANE_STALL_MS = 1500;
+const LANE_STALL_CHECK_INTERVAL_MS = 500;
 const MAX_PROGRESSIVE_SEEK_CHASE_AHEAD_SECONDS = 3;
 const LOCAL_SEEK_ACK_GRACE_MS = 2000;
 const TRANSFER_PROGRESS_BUCKET = 0.02;
@@ -102,7 +100,6 @@ const DRIFT_THRESHOLD_SECONDS = 1.2;
 const PLAYBACK_END_TOLERANCE_SECONDS = 0.35;
 const DATA_CHANNEL_HIGH_WATER_MARK = 4 * 1024 * 1024;
 const DATA_CHANNEL_LOW_WATER_MARK = 512 * 1024;
-const ICE_SERVERS: RTCIceServer[] = [{ urls: "stun:stun.l.google.com:19302" }];
 const CONTROLS_IDLE_DELAY_MS = 3000;
 const MEDIA_TITLE_MAX_LENGTH = 50;
 const DEFAULT_EFFECTIVE_BITRATE_BPS = 12_000_000;
@@ -133,11 +130,6 @@ type PeerControlMessage =
       targetTime?: number;
     }
   | {
-      type: "chunk-meta";
-      startByte: number;
-      endByte: number;
-    }
-  | {
       type: "range-complete";
       startByte: number;
       endByte: number;
@@ -155,6 +147,15 @@ type PeerControlMessage =
   | {
       type: "file-complete";
     };
+
+interface PeerLane {
+  index: number;
+  peer: RTCPeerConnection;
+  channel: RTCDataChannel | null;
+  connectTimeout: number | null;
+  lastByteAt: number;
+  stalled: boolean;
+}
 
 interface PendingPlaybackRestore {
   time: number;
@@ -183,7 +184,6 @@ const fallbackDesktopApi = {
     mediaUrl: ""
   }),
   writeTempMediaChunk: async () => undefined,
-  markTempMediaRangeAvailable: async () => undefined,
   waitForTempMediaRange: async () => ({
     availableEndByte: 0
   }),
@@ -418,7 +418,7 @@ export function LocalFileRoomPlayer({
   showLoadingOverlay = false,
   loadingPercent = 0,
   remoteCommand,
-  peerSignal,
+  subscribeToPeerSignals,
   onDebug,
   onPlay,
   onPause,
@@ -433,19 +433,18 @@ export function LocalFileRoomPlayer({
   onStartRelayFallback
 }: LocalFileRoomPlayerProps) {
   const isHost = room.hostParticipantId === selfId;
-  const peerRef = useRef<RTCPeerConnection | null>(null);
-  const dataChannelRef = useRef<RTCDataChannel | null>(null);
+  const lanesRef = useRef(new Map<number, PeerLane>());
+  const peerSignalTaskRef = useRef<Promise<void>>(Promise.resolve());
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const suppressEventsRef = useRef(false);
   const lastAppliedEventIdRef = useRef(-1);
   const activePeerIdRef = useRef<string | null>(null);
-  const pendingIceCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
-  const pendingChunkMetaQueueRef = useRef<ByteRange[]>([]);
+  const pendingIceCandidatesRef = useRef(new Map<number, RTCIceCandidateInit[]>());
   const availableRangesRef = useRef<ByteRange[]>([]);
   const contiguousBytesRef = useRef(0);
-  const inFlightRequestsRef = useRef<Array<ByteRange & { reason: RangeRequestReason; targetTime?: number; issuedAt: number }>>(
-    []
-  );
+  const inFlightRequestsRef = useRef<
+    Array<ByteRange & { reason: RangeRequestReason; targetTime?: number; issuedAt: number; lane: number }>
+  >([]);
   const objectUrlRef = useRef<string | null>(null);
   const cacheIdRef = useRef<string | null>(null);
   const cacheMediaUrlRef = useRef<string | null>(null);
@@ -708,6 +707,10 @@ export function LocalFileRoomPlayer({
     () => room.participants.find((participant) => participant.id !== selfId)?.id ?? null,
     [room.participants, selfId]
   );
+
+  useEffect(() => {
+    void loadIceServers();
+  }, []);
 
   useEffect(() => {
     isRelayTransportActiveRef.current = isRelayTransportActive;
@@ -1055,8 +1058,8 @@ export function LocalFileRoomPlayer({
     if (isHost) {
       void prepareHostMedia();
 
-      if (remoteParticipantId && !peerRef.current && !isRelayTransportActive) {
-        void createHostPeer(remoteParticipantId);
+      if (remoteParticipantId && lanesRef.current.size === 0 && !isRelayTransportActive) {
+        void createHostLanes(remoteParticipantId);
       }
 
       return;
@@ -1131,13 +1134,35 @@ export function LocalFileRoomPlayer({
     room.updatedAt
   ]);
 
+  const handlePeerSignalRef = useRef(handlePeerSignal);
+  handlePeerSignalRef.current = handlePeerSignal;
+  const releaseStalledLanesRef = useRef(releaseStalledLanes);
+  releaseStalledLanesRef.current = releaseStalledLanes;
+
   useEffect(() => {
-    if (canUseLocalTorrentPlayback || isRelayTransportActive || !peerSignal || peerSignal.roomId !== room.roomId) {
+    if (isHost || PEER_LANE_COUNT < 2) {
       return;
     }
 
-    void handlePeerSignal(peerSignal);
-  }, [canUseLocalTorrentPlayback, isRelayTransportActive, peerSignal, room.roomId]);
+    const interval = window.setInterval(() => releaseStalledLanesRef.current(), LANE_STALL_CHECK_INTERVAL_MS);
+    return () => window.clearInterval(interval);
+  }, [isHost]);
+
+  useEffect(() => {
+    if (canUseLocalTorrentPlayback || isRelayTransportActive) {
+      return;
+    }
+
+    return subscribeToPeerSignals((signal) => {
+      if (signal.roomId !== room.roomId) {
+        return;
+      }
+
+      // Handle signals strictly in arrival order: an offer must be applied
+      // before the candidates that follow it.
+      peerSignalTaskRef.current = peerSignalTaskRef.current.then(() => handlePeerSignalRef.current(signal));
+    });
+  }, [canUseLocalTorrentPlayback, isRelayTransportActive, room.roomId, subscribeToPeerSignals]);
 
   useEffect(() => {
     if (
@@ -1457,6 +1482,19 @@ export function LocalFileRoomPlayer({
           Array.from(guestBrowserChunkMapRef.current.keys()).sort((left, right) => left - right)[0] ?? null,
         contiguousBytes: contiguousBytesRef.current,
         availableRanges: availableRangesRef.current,
+        lanes: Array.from(lanesRef.current.values()).map((lane) => ({
+          index: lane.index,
+          connectionState: lane.peer.connectionState,
+          channelState: lane.channel?.readyState ?? null,
+          msSinceLastByte: lane.lastByteAt ? Date.now() - lane.lastByteAt : null,
+          stalled: lane.stalled
+        })),
+        inFlightRequests: inFlightRequestsRef.current.map((request) => ({
+          lane: request.lane,
+          startByte: request.startByte,
+          endByte: request.endByte,
+          ageMs: Date.now() - request.issuedAt
+        })),
         chunkStats: {
           sentChunks: sentChunkCountRef.current,
           sentBytes: sentChunkBytesRef.current,
@@ -2288,19 +2326,16 @@ export function LocalFileRoomPlayer({
     }
   }
 
-  async function createHostPeer(targetParticipantId: string) {
-    reportLocalDebug("createHostPeer", { targetParticipantId });
+  async function createHostLanes(targetParticipantId: string) {
+    reportLocalDebug("createHostLanes", { targetParticipantId, lanes: PEER_LANE_COUNT });
+    const iceServers = await loadIceServers();
     cleanupPeer();
-    const peer = buildPeerConnection(targetParticipantId);
     activePeerIdRef.current = targetParticipantId;
-    const dataChannel = peer.createDataChannel("syncplay-file");
-    dataChannel.binaryType = "arraybuffer";
-    dataChannelRef.current = dataChannel;
-    attachDataChannel(targetParticipantId, dataChannel);
-    peerRef.current = peer;
-    const offer = await peer.createOffer();
-    await peer.setLocalDescription(offer);
-    onPeerOffer(targetParticipantId, offer);
+
+    for (let index = 0; index < PEER_LANE_COUNT; index += 1) {
+      void createHostLane(targetParticipantId, index, iceServers);
+    }
+
     publishTransferState(
       buildTransferState("connecting_peer", {
         message: "Connecting to peer"
@@ -2308,65 +2343,193 @@ export function LocalFileRoomPlayer({
     );
   }
 
-  async function createGuestPeer(sourceParticipantId: string) {
-    reportLocalDebug("createGuestPeer", { sourceParticipantId });
-    cleanupPeer();
-    const peer = buildPeerConnection(sourceParticipantId);
-    peer.ondatachannel = (event) => {
-      dataChannelRef.current = event.channel;
-      attachDataChannel(sourceParticipantId, event.channel);
-    };
-    peerRef.current = peer;
-    activePeerIdRef.current = sourceParticipantId;
-    publishTransferState(
-      buildTransferState("connecting_peer", {
-        message: "Waiting for file transfer"
-      })
-    );
-    return peer;
+  async function createHostLane(targetParticipantId: string, index: number, iceServers: RTCIceServer[]) {
+    closeLane(index);
+    const lane = buildLane(targetParticipantId, index, iceServers);
+    const dataChannel = lane.peer.createDataChannel("syncplay-file");
+    dataChannel.binaryType = "arraybuffer";
+    lane.channel = dataChannel;
+    attachDataChannel(targetParticipantId, lane, dataChannel);
+    lane.connectTimeout = window.setTimeout(() => {
+      lane.connectTimeout = null;
+      if (lanesRef.current.get(index) === lane && lane.peer.connectionState !== "connected") {
+        reportLocalDebug("peer lane connect timeout", { targetParticipantId, lane: index });
+        handleLaneDisconnect(targetParticipantId, lane);
+      }
+    }, PEER_CONNECT_TIMEOUT_MS);
+    const offer = await lane.peer.createOffer();
+
+    if (lanesRef.current.get(index) !== lane) {
+      return;
+    }
+
+    await lane.peer.setLocalDescription(offer);
+    onPeerOffer(targetParticipantId, offer, index);
   }
 
-  function buildPeerConnection(targetParticipantId: string) {
-    const peer = new RTCPeerConnection({ iceServers: ICE_SERVERS });
-    reportLocalDebug("peer connection created", { targetParticipantId });
+  function createGuestLane(sourceParticipantId: string, index: number, iceServers: RTCIceServer[]) {
+    reportLocalDebug("createGuestLane", { sourceParticipantId, lane: index });
+    closeLane(index);
+    activePeerIdRef.current = sourceParticipantId;
+    const lane = buildLane(sourceParticipantId, index, iceServers);
+    lane.peer.ondatachannel = (event) => {
+      if (lanesRef.current.get(index) !== lane) {
+        return;
+      }
+
+      lane.channel = event.channel;
+      attachDataChannel(sourceParticipantId, lane, event.channel);
+    };
+
+    if (!hasOpenLane()) {
+      publishTransferState(
+        buildTransferState("connecting_peer", {
+          message: "Waiting for file transfer"
+        })
+      );
+    }
+
+    return lane;
+  }
+
+  function buildLane(targetParticipantId: string, index: number, iceServers: RTCIceServer[]) {
+    const peer = new RTCPeerConnection({ iceServers });
+    const lane: PeerLane = { index, peer, channel: null, connectTimeout: null, lastByteAt: 0, stalled: false };
+    lanesRef.current.set(index, lane);
+    reportLocalDebug("peer connection created", { targetParticipantId, lane: index });
     peer.onicecandidate = (event) => {
       if (event.candidate) {
         reportLocalDebug("peer ice candidate", {
           targetParticipantId,
+          lane: index,
           candidateType: event.candidate.type ?? "unknown"
         });
-        onPeerIceCandidate(targetParticipantId, event.candidate.toJSON());
+        onPeerIceCandidate(targetParticipantId, event.candidate.toJSON(), index);
       }
     };
     peer.onconnectionstatechange = () => {
       reportLocalDebug("peer connection state", {
         targetParticipantId,
+        lane: index,
         state: peer.connectionState
       });
-      if (suppressDisconnectRef.current) {
+      if (suppressDisconnectRef.current || lanesRef.current.get(index) !== lane) {
         return;
       }
 
       if (peer.connectionState === "connected") {
         reconnectAttemptRef.current = 0;
+        if (lane.connectTimeout !== null) {
+          window.clearTimeout(lane.connectTimeout);
+          lane.connectTimeout = null;
+        }
         return;
       }
 
+      // Tearing down and reconnecting recovers faster than an ICE restart
+      // (measured with scripts/bench-transfer --scenario=blackout).
       if (peer.connectionState === "disconnected" || peer.connectionState === "failed") {
-        handlePeerDisconnect(targetParticipantId);
+        handleLaneDisconnect(targetParticipantId, lane);
       }
     };
-    return peer;
+    return lane;
   }
 
-  function attachDataChannel(targetParticipantId: string, channel: RTCDataChannel) {
+  function closeLane(index: number) {
+    const lane = lanesRef.current.get(index);
+
+    if (!lane) {
+      return;
+    }
+
+    lanesRef.current.delete(index);
+    if (lane.connectTimeout !== null) {
+      window.clearTimeout(lane.connectTimeout);
+    }
+    lane.channel?.close();
+    lane.peer.close();
+    // Requests that lane was serving are re-issued on the remaining lanes.
+    inFlightRequestsRef.current = inFlightRequestsRef.current.filter((request) => request.lane !== index);
+  }
+
+  function getOpenLanes() {
+    return Array.from(lanesRef.current.values()).filter((lane) => lane.channel?.readyState === "open");
+  }
+
+  function hasOpenLane() {
+    return getOpenLanes().length > 0;
+  }
+
+  function getMaxInflightRequests() {
+    return PEER_LANE_COUNT > 1 ? getOpenLanes().length * MAX_INFLIGHT_REQUESTS_PER_LANE : MAX_PREFETCH_INFLIGHT_REQUESTS;
+  }
+
+  // The open lane with the fewest outstanding range requests, avoiding lanes
+  // that are currently stuck unless nothing else is available.
+  function pickRequestLane() {
+    let best: { lane: PeerLane; inflight: number } | null = null;
+    const openLanes = getOpenLanes();
+    const healthyLanes = openLanes.filter((lane) => !lane.stalled);
+
+    for (const lane of healthyLanes.length > 0 ? healthyLanes : openLanes) {
+      const inflight = inFlightRequestsRef.current.filter((request) => request.lane === lane.index).length;
+
+      if (!best || inflight < best.inflight) {
+        best = { lane, inflight };
+      }
+    }
+
+    return best?.lane ?? null;
+  }
+
+  function releaseStalledLanes() {
+    const openLanes = getOpenLanes();
+    const now = Date.now();
+
+    if (isHost || openLanes.length < 2 || !openLanes.some((lane) => now - lane.lastByteAt < LANE_STALL_MS)) {
+      return;
+    }
+
+    let released = false;
+
+    for (const lane of openLanes) {
+      const laneRequests = inFlightRequestsRef.current.filter((request) => request.lane === lane.index);
+
+      if (lane.stalled || laneRequests.length === 0) {
+        continue;
+      }
+
+      const lastProgressAt = Math.max(lane.lastByteAt, Math.min(...laneRequests.map((request) => request.issuedAt)));
+
+      if (now - lastProgressAt < LANE_STALL_MS) {
+        continue;
+      }
+
+      lane.stalled = true;
+      released = true;
+      inFlightRequestsRef.current = inFlightRequestsRef.current.filter((request) => request.lane !== lane.index);
+      reportLocalDebug("peer lane stalled", { lane: lane.index, releasedRequests: laneRequests.length });
+    }
+
+    if (released) {
+      requestTrailingMetadataRange();
+      maybeRequestProgressivePrefetch(pendingSeekTimeRef.current !== undefined ? "seek" : "sequential");
+    }
+  }
+
+  function sendToAnyLane(message: PeerControlMessage) {
+    getOpenLanes()[0]?.channel?.send(JSON.stringify(message));
+  }
+
+  function attachDataChannel(targetParticipantId: string, lane: PeerLane, channel: RTCDataChannel) {
     reportLocalDebug("attachDataChannel", {
       targetParticipantId,
+      lane: lane.index,
       label: channel.label,
       readyState: channel.readyState
     });
     channel.onopen = () => {
-      reportLocalDebug("data channel open", { targetParticipantId });
+      reportLocalDebug("data channel open", { targetParticipantId, lane: lane.index });
       if (isHost) {
         updateLocalMessage("Connected to peer");
         return;
@@ -2379,10 +2542,12 @@ export function LocalFileRoomPlayer({
 
     channel.onmessage = (event) => {
       if (typeof event.data === "string") {
-        void handleControlMessage(targetParticipantId, JSON.parse(event.data) as PeerControlMessage);
+        void handleControlMessage(targetParticipantId, JSON.parse(event.data) as PeerControlMessage, lane, channel);
         return;
       }
 
+      lane.lastByteAt = Date.now();
+      lane.stalled = false;
       pendingBinaryChunkTaskRef.current = pendingBinaryChunkTaskRef.current
         .then(() => handleBinaryChunk(event.data))
         .catch((error: unknown) => {
@@ -2394,79 +2559,96 @@ export function LocalFileRoomPlayer({
 
     channel.onerror = () => {
       reportLocalDebug("data channel error", {
-        targetParticipantId
+        targetParticipantId,
+        lane: lane.index
       });
-      handlePeerDisconnect(targetParticipantId);
+      if (lanesRef.current.get(lane.index) === lane) {
+        handleLaneDisconnect(targetParticipantId, lane);
+      }
     };
 
     channel.onclose = () => {
       reportLocalDebug("data channel close", {
-        targetParticipantId
+        targetParticipantId,
+        lane: lane.index
       });
     };
   }
 
   async function handlePeerSignal(signal: PeerSignal) {
+    const laneIndex = signal.lane ?? 0;
     reportLocalDebug("handlePeerSignal", {
       type: signal.type,
+      lane: laneIndex,
       sourceParticipantId: signal.sourceParticipantId
     });
 
     try {
       if (signal.type === "peer_offer") {
-        const shouldCreateNewPeer =
-          !peerRef.current || (activePeerIdRef.current !== null && activePeerIdRef.current !== signal.sourceParticipantId);
-        const peer = shouldCreateNewPeer ? await createGuestPeer(signal.sourceParticipantId) : peerRef.current;
-
-        if (!peer) {
-          return;
-        }
-
-        await peer.setRemoteDescription(signal.sdp);
-        await flushPendingIceCandidates(peer);
-        const answer = await peer.createAnswer();
-        await peer.setLocalDescription(answer);
+        // Every offer starts a fresh connection for that lane: the host never
+        // renegotiates, it tears down and reconnects.
+        const iceServers = await loadIceServers();
+        const lane = createGuestLane(signal.sourceParticipantId, laneIndex, iceServers);
+        await lane.peer.setRemoteDescription(signal.sdp);
+        await flushPendingIceCandidates(lane);
+        const answer = await lane.peer.createAnswer();
+        await lane.peer.setLocalDescription(answer);
         reportLocalDebug("peer answer created", {
-          sourceParticipantId: signal.sourceParticipantId
+          sourceParticipantId: signal.sourceParticipantId,
+          lane: laneIndex
         });
-        onPeerAnswer(signal.sourceParticipantId, answer);
+        onPeerAnswer(signal.sourceParticipantId, answer, laneIndex);
         return;
       }
 
+      const lane = lanesRef.current.get(laneIndex);
+
       if (signal.type === "peer_answer") {
-        if (!peerRef.current) {
+        // Answers for a lane that has since been replaced are stale.
+        if (!lane || lane.peer.signalingState !== "have-local-offer") {
           return;
         }
 
-        await peerRef.current.setRemoteDescription(signal.sdp);
-        await flushPendingIceCandidates(peerRef.current);
+        await lane.peer.setRemoteDescription(signal.sdp);
+        await flushPendingIceCandidates(lane);
         reportLocalDebug("peer answer applied", {
-          sourceParticipantId: signal.sourceParticipantId
+          sourceParticipantId: signal.sourceParticipantId,
+          lane: laneIndex
         });
         return;
       }
 
       if (signal.type === "peer_ice_candidate") {
-        if (!peerRef.current || !peerRef.current.remoteDescription) {
-          pendingIceCandidatesRef.current.push(signal.candidate);
+        if (!lane || !lane.peer.remoteDescription) {
+          const pending = pendingIceCandidatesRef.current.get(laneIndex) ?? [];
+          pendingIceCandidatesRef.current.set(laneIndex, [...pending, signal.candidate]);
           reportLocalDebug("peer ice candidate queued", {
-            sourceParticipantId: signal.sourceParticipantId
+            sourceParticipantId: signal.sourceParticipantId,
+            lane: laneIndex
           });
           return;
         }
 
-        await peerRef.current.addIceCandidate(signal.candidate);
+        await lane.peer.addIceCandidate(signal.candidate);
         reportLocalDebug("peer ice candidate applied", {
-          sourceParticipantId: signal.sourceParticipantId
+          sourceParticipantId: signal.sourceParticipantId,
+          lane: laneIndex
         });
       }
     } catch (error) {
       const errorDetails = {
         type: signal.type,
+        lane: laneIndex,
         sourceParticipantId: signal.sourceParticipantId,
         error: formatError(error)
       };
       reportLocalDebug("peer signal failed", errorDetails);
+
+      // One broken lane is recoverable as long as another one carries data.
+      if (hasOpenLane()) {
+        return;
+      }
+
       updateLocalMessage("Peer negotiation failed");
       publishTransferState(
         buildTransferState("failed", {
@@ -2477,7 +2659,7 @@ export function LocalFileRoomPlayer({
     }
   }
 
-  function handlePeerDisconnect(targetParticipantId: string) {
+  function handleLaneDisconnect(targetParticipantId: string, lane: PeerLane) {
     if (suppressDisconnectRef.current) {
       return;
     }
@@ -2487,38 +2669,49 @@ export function LocalFileRoomPlayer({
       return;
     }
 
-    reconnectAttemptRef.current += 1;
-    reportLocalDebug("peer disconnect", {
+    closeLane(lane.index);
+    reportLocalDebug("peer lane disconnect", {
       targetParticipantId,
-      reconnectAttempt: reconnectAttemptRef.current
+      lane: lane.index,
+      openLanes: getOpenLanes().length
     });
-    const video = videoRef.current;
-    video?.pause();
-    updateLocalMessage("Reconnecting to host");
 
-    publishTransferState(
-      buildTransferState("connecting_peer", {
-        message: "Reconnecting to host",
-        reconnectAttempt: reconnectAttemptRef.current
-      })
-    );
-
-    cleanupPeer();
+    if (hasOpenLane()) {
+      // Other lanes keep the transfer going; pick up this lane's requests.
+      maybeRequestProgressivePrefetch(pendingSeekTimeRef.current !== undefined ? "seek" : "sequential");
+    } else {
+      reconnectAttemptRef.current += 1;
+      const video = videoRef.current;
+      video?.pause();
+      updateLocalMessage("Reconnecting to host");
+      publishTransferState(
+        buildTransferState("connecting_peer", {
+          message: "Reconnecting to host",
+          reconnectAttempt: reconnectAttemptRef.current
+        })
+      );
+    }
 
     if (isHost) {
       window.setTimeout(() => {
         if (
           !isRelayTransportActiveRef.current &&
           room.hostParticipantId === selfId &&
-          remoteParticipantIdRef.current === targetParticipantId
+          remoteParticipantIdRef.current === targetParticipantId &&
+          !lanesRef.current.has(lane.index)
         ) {
-          void createHostPeer(targetParticipantId);
+          void loadIceServers().then((iceServers) => createHostLane(targetParticipantId, lane.index, iceServers));
         }
-      }, 600);
+      }, PEER_RECONNECT_DELAY_MS);
     }
   }
 
-  async function handleControlMessage(sourceParticipantId: string, message: PeerControlMessage) {
+  async function handleControlMessage(
+    sourceParticipantId: string,
+    message: PeerControlMessage,
+    lane: PeerLane,
+    channel: RTCDataChannel
+  ) {
     switch (message.type) {
       case "file-start":
         durationRef.current = message.duration ?? durationRef.current;
@@ -2529,20 +2722,12 @@ export function LocalFileRoomPlayer({
         await ensureTempCache();
         return;
       case "range-request":
-        if (!isHost || !localFile || !dataChannelRef.current) {
+        if (!isHost || !localFile || channel.readyState !== "open") {
           return;
         }
 
-        await sendRequestedRange(dataChannelRef.current, message);
-        return;
-      case "chunk-meta":
-        pendingChunkMetaQueueRef.current = [
-          ...pendingChunkMetaQueueRef.current,
-          {
-            startByte: message.startByte,
-            endByte: message.endByte
-          }
-        ];
+        // Answer on the lane the request arrived on.
+        await sendRequestedRange(channel, lane.peer, message);
         return;
       case "range-complete":
         const matchingRequest = inFlightRequestsRef.current.find(
@@ -2583,6 +2768,7 @@ export function LocalFileRoomPlayer({
 
   async function sendRequestedRange(
     channel: RTCDataChannel,
+    peer: RTCPeerConnection,
     request: Extract<PeerControlMessage, { type: "range-request" }>
   ) {
     if (!localFile) {
@@ -2606,9 +2792,10 @@ export function LocalFileRoomPlayer({
 
     let offset = request.startByte;
     let chunksSinceYield = 0;
+    const chunkPayloadBytes = getChunkPayloadBytes(peer);
 
-    while (offset < request.endByte) {
-      const length = Math.min(CHUNK_SIZE, request.endByte - offset);
+    while (offset < request.endByte && channel.readyState === "open") {
+      const length = Math.min(chunkPayloadBytes, request.endByte - offset);
       const chunk = await readLocalChunk(localFile, offset, length);
 
       if (chunk.byteLength === 0) {
@@ -2616,14 +2803,7 @@ export function LocalFileRoomPlayer({
       }
 
       const endByte = offset + chunk.byteLength;
-      channel.send(
-        JSON.stringify({
-          type: "chunk-meta",
-          startByte: offset,
-          endByte
-        } satisfies PeerControlMessage)
-      );
-      channel.send(Uint8Array.from(chunk));
+      channel.send(encodeChunkMessage(offset, chunk));
       sentChunkCountRef.current += 1;
       sentChunkBytesRef.current += chunk.byteLength;
       offset = endByte;
@@ -2665,29 +2845,28 @@ export function LocalFileRoomPlayer({
   }
 
   async function handleBinaryChunk(payload: Blob | ArrayBuffer) {
-    const range = pendingChunkMetaQueueRef.current[0];
+    const decoded = decodeChunkMessage(payload instanceof Blob ? await payload.arrayBuffer() : payload);
 
-    if (!range) {
+    if (!decoded) {
       return;
     }
 
-    pendingChunkMetaQueueRef.current = pendingChunkMetaQueueRef.current.slice(1);
-    const chunk = payload instanceof Blob ? new Uint8Array(await payload.arrayBuffer()) : new Uint8Array(payload);
+    const { startByte, chunk } = decoded;
     recordIncomingTransferChunk(chunk.byteLength);
     receivedChunkCountRef.current += 1;
     receivedChunkBytesRef.current += chunk.byteLength;
 
     const cacheHandle = await ensureTempCache();
     if (cacheHandle.cacheId) {
-      await desktopApi.writeTempMediaChunk(cacheHandle.cacheId, range.startByte, chunk);
-      await desktopApi.markTempMediaRangeAvailable(cacheHandle.cacheId, range.startByte, range.startByte + chunk.byteLength);
+      // The main process marks the range available as part of the write.
+      await desktopApi.writeTempMediaChunk(cacheHandle.cacheId, startByte, chunk);
     } else {
-      await persistGuestChunkInBrowser(range.startByte, chunk);
+      await persistGuestChunkInBrowser(startByte, chunk);
     }
 
     availableRangesRef.current = mergeRanges(availableRangesRef.current, {
-      startByte: range.startByte,
-      endByte: range.startByte + chunk.byteLength
+      startByte,
+      endByte: startByte + chunk.byteLength
     });
     contiguousBytesRef.current = getContiguousEnd(availableRangesRef.current);
 
@@ -2744,14 +2923,10 @@ export function LocalFileRoomPlayer({
       })
     );
 
-    if (dataChannelRef.current) {
-      dataChannelRef.current.send(
-        JSON.stringify({
-          type: "buffer-ready",
-          bufferedUntilTime: actualMediaBufferedUntil ?? getExpectedBufferedUntil(video.currentTime)
-        } satisfies PeerControlMessage)
-      );
-    }
+    sendToAnyLane({
+      type: "buffer-ready",
+      bufferedUntilTime: actualMediaBufferedUntil ?? getExpectedBufferedUntil(video.currentTime)
+    });
   }
 
   function maybeResumePendingSeek() {
@@ -2793,7 +2968,7 @@ export function LocalFileRoomPlayer({
   }
 
   function requestNextRange(reason: RangeRequestReason) {
-    if (isHost || isRelayTransportActive || !dataChannelRef.current || dataChannelRef.current.readyState !== "open") {
+    if (isHost || isRelayTransportActive || !hasOpenLane()) {
       return false;
     }
 
@@ -2808,9 +2983,10 @@ export function LocalFileRoomPlayer({
       return false;
     }
 
+    const windowBytes = PEER_LANE_COUNT > 1 ? LANE_REQUEST_WINDOW_BYTES : REQUEST_WINDOW_BYTES;
     const endByte = Math.min(
       room.mediaSource.fileSize,
-      Math.max(startByte + REQUEST_WINDOW_BYTES, targetByte !== undefined ? targetByte + REQUEST_WINDOW_BYTES : 0)
+      Math.max(startByte + windowBytes, targetByte !== undefined ? targetByte + windowBytes : 0)
     );
 
     if (isRangeCoveredByAvailable(startByte, endByte) || isRangeCoveredByInflight(startByte, endByte)) {
@@ -2819,20 +2995,18 @@ export function LocalFileRoomPlayer({
 
     requestSpecificRange(startByte, endByte, reason, targetTime);
 
-    if (reason === "seek" && targetTime !== undefined && dataChannelRef.current) {
-      dataChannelRef.current.send(
-        JSON.stringify({
-          type: "seek-buffering",
-          targetTime
-        } satisfies PeerControlMessage)
-      );
+    if (reason === "seek" && targetTime !== undefined) {
+      sendToAnyLane({
+        type: "seek-buffering",
+        targetTime
+      });
     }
 
     return true;
   }
 
   function maybeRequestProgressivePrefetch(reason: RangeRequestReason) {
-    if (isHost || isRelayTransportActive || !dataChannelRef.current || dataChannelRef.current.readyState !== "open") {
+    if (isHost || isRelayTransportActive || !hasOpenLane()) {
       return;
     }
 
@@ -2857,7 +3031,7 @@ export function LocalFileRoomPlayer({
       return;
     }
 
-    while (inFlightRequestsRef.current.length < MAX_PREFETCH_INFLIGHT_REQUESTS) {
+    while (inFlightRequestsRef.current.length < getMaxInflightRequests()) {
       if (!requestNextRange(reason)) {
         break;
       }
@@ -2880,7 +3054,9 @@ export function LocalFileRoomPlayer({
   }
 
   function requestSpecificRange(startByte: number, endByte: number, reason: RangeRequestReason, targetTime?: number) {
-    if (isHost || isRelayTransportActive || !dataChannelRef.current || dataChannelRef.current.readyState !== "open") {
+    const lane = isHost || isRelayTransportActive ? null : pickRequestLane();
+
+    if (!lane?.channel) {
       return;
     }
 
@@ -2924,8 +3100,8 @@ export function LocalFileRoomPlayer({
               : "Ready to play"
             : effectiveTransferState?.message ?? "Preparing playback";
 
-    inFlightRequestsRef.current = [...inFlightRequestsRef.current, { ...requestRange, reason, targetTime }];
-    dataChannelRef.current.send(
+    inFlightRequestsRef.current = [...inFlightRequestsRef.current, { ...requestRange, reason, targetTime, lane: lane.index }];
+    lane.channel.send(
       JSON.stringify({
         type: "range-request",
         startByte,
@@ -4095,13 +4271,11 @@ export function LocalFileRoomPlayer({
 
   function cleanupPeer() {
     suppressDisconnectRef.current = true;
-    dataChannelRef.current?.close();
-    peerRef.current?.close();
-    dataChannelRef.current = null;
-    peerRef.current = null;
+    for (const index of Array.from(lanesRef.current.keys())) {
+      closeLane(index);
+    }
     activePeerIdRef.current = null;
-    pendingIceCandidatesRef.current = [];
-    pendingChunkMetaQueueRef.current = [];
+    pendingIceCandidatesRef.current = new Map();
     pendingBinaryChunkTaskRef.current = Promise.resolve();
     pendingGuestBrowserPersistenceTaskRef.current = Promise.resolve();
     inFlightRequestsRef.current = [];
@@ -4110,16 +4284,18 @@ export function LocalFileRoomPlayer({
     }, 0);
   }
 
-  async function flushPendingIceCandidates(peer: RTCPeerConnection) {
-    if (!peer.remoteDescription || pendingIceCandidatesRef.current.length === 0) {
+  async function flushPendingIceCandidates(lane: PeerLane) {
+    const pendingCandidates = pendingIceCandidatesRef.current.get(lane.index);
+
+    if (!lane.peer.remoteDescription || !pendingCandidates?.length) {
       return;
     }
 
-    const pendingCandidates = [...pendingIceCandidatesRef.current];
-    pendingIceCandidatesRef.current = [];
+    pendingIceCandidatesRef.current.delete(lane.index);
 
     for (const candidate of pendingCandidates) {
-      await peer.addIceCandidate(new RTCIceCandidate(candidate));
+      // Candidates queued for a lane's previous connection no longer apply.
+      await lane.peer.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => undefined);
     }
   }
 
@@ -4437,6 +4613,35 @@ function getMediaBufferedEnd(video: HTMLVideoElement | null) {
   } catch {
     return undefined;
   }
+}
+
+function getChunkPayloadBytes(peer: RTCPeerConnection | null) {
+  const negotiatedMax = peer?.sctp?.maxMessageSize || MAX_DATA_CHANNEL_MESSAGE_BYTES;
+  return Math.min(negotiatedMax, MAX_DATA_CHANNEL_MESSAGE_BYTES) - CHUNK_HEADER_BYTES;
+}
+
+function encodeChunkMessage(startByte: number, chunk: Uint8Array) {
+  const message = new Uint8Array(CHUNK_HEADER_BYTES + chunk.byteLength);
+  new DataView(message.buffer).setFloat64(0, startByte);
+  message.set(chunk, CHUNK_HEADER_BYTES);
+  return message;
+}
+
+function decodeChunkMessage(payload: ArrayBuffer) {
+  if (payload.byteLength <= CHUNK_HEADER_BYTES) {
+    return null;
+  }
+
+  const startByte = new DataView(payload).getFloat64(0);
+
+  if (!Number.isSafeInteger(startByte) || startByte < 0) {
+    return null;
+  }
+
+  return {
+    startByte,
+    chunk: new Uint8Array(payload, CHUNK_HEADER_BYTES)
+  };
 }
 
 function yieldToUi() {

@@ -1,0 +1,477 @@
+{
+  "generatedAt": "2026-10-21T01:41:53.203Z",
+  "fileSize": 456984128,
+  "rounds": 4,
+  "summary": {
+    "legacy": {
+      "startupMs": {
+        "min": 2385.10000000149,
+        "median": 2600.050000000745,
+        "mean": 2698.97500000149,
+        "max": 3210.7000000029802
+      },
+      "seekMs": {
+        "min": 111.29999999701977,
+        "median": 113.60000000149012,
+        "mean": 113.52500000037253,
+        "max": 115.60000000149012
+      },
+      "sustainedMiBps": {
+        "min": 67.73984299697538,
+        "median": 70.90532272364494,
+        "mean": 70.19314198266883,
+        "max": 71.2220794864101
+      },
+      "hostCpuMsPerMiB": {
+        "min": 28.7490081915843,
+        "median": 28.881524578324047,
+        "mean": 29.12281672074176,
+        "max": 29.979209534734647
+      },
+      "guestCpuMsPerMiB": {
+        "min": 26.619361266779045,
+        "median": 26.793691360554178,
+        "mean": 26.971676109538727,
+        "max": 27.679960450267515
+      },
+      "messagesPerRun": 7086,
+      "integrityOk": true
+    },
+    "current": {
+      "startupMs": {
+        "min": 2363.6999999955297,
+        "median": 2399.650000002235,
+        "mean": 2493.6500000003725,
+        "max": 2811.60000000149
+      },
+      "seekMs": {
+        "min": 110,
+        "median": 111.65000000223517,
+        "mean": 111.80000000074506,
+        "max": 113.89999999850988
+      },
+      "sustainedMiBps": {
+        "min": 71.2337331610451,
+        "median": 71.6801846264242,
+        "mean": 71.6981499690879,
+        "max": 72.1984974624581
+      },
+      "hostCpuMsPerMiB": {
+        "min": 27.768098962841968,
+        "median": 27.940960540318756,
+        "mean": 27.922889758902087,
+        "max": 28.041538992128853
+      },
+      "guestCpuMsPerMiB": {
+        "min": 23.554014764206457,
+        "median": 23.681751589306806,
+        "mean": 23.657753967892724,
+        "max": 23.713497928750833
+      },
+      "messagesPerRun": 1911,
+      "integrityOk": true
+    },
+    "header128-currentWrite": {
+      "startupMs": {
+        "min": 2413.60000000149,
+        "median": 2611.4500000029802,
+        "mean": 2612.9750000033528,
+        "max": 2815.4000000059605
+      },
+      "seekMs": {
+        "min": 113.19999999552965,
+        "median": 114.89999999850988,
+        "mean": 114.87499999813735,
+        "max": 116.5
+      },
+      "sustainedMiBps": {
+        "min": 66.69061392645295,
+        "median": 69.91318988465974,
+        "mean": 69.24235060500415,
+        "max": 70.45240872424412
+      },
+      "hostCpuMsPerMiB": {
+        "min": 29.049328952798994,
+        "median": 29.152507137368275,
+        "mean": 29.412193020060457,
+        "max": 30.294428852706268
+      },
+      "guestCpuMsPerMiB": {
+        "min": 24.62812659219534,
+        "median": 24.68453712177943,
+        "mean": 24.963268972492642,
+        "max": 25.85587505421637
+      },
+      "messagesPerRun": 3654,
+      "integrityOk": true
+    },
+    "meta128-currentWrite": {
+      "startupMs": {
+        "min": 2400.2999999970198,
+        "median": 2410.949999999255,
+        "mean": 2504.8749999981374,
+        "max": 2797.2999999970198
+      },
+      "seekMs": {
+        "min": 114.10000000149012,
+        "median": 114.65000000223517,
+        "mean": 114.77500000223517,
+        "max": 115.70000000298023
+      },
+      "sustainedMiBps": {
+        "min": 69.44594574245059,
+        "median": 69.69220138948202,
+        "mean": 69.81024432115893,
+        "max": 70.4106287632211
+      },
+      "hostCpuMsPerMiB": {
+        "min": 29.126499484270926,
+        "median": 29.264511334345507,
+        "mean": 29.25643678926197,
+        "max": 29.37022500408594
+      },
+      "guestCpuMsPerMiB": {
+        "min": 24.691073166584907,
+        "median": 24.821392515269146,
+        "mean": 24.844979411031083,
+        "max": 25.046059447001127
+      },
+      "messagesPerRun": 7086,
+      "integrityOk": true
+    },
+    "header256-legacyWrite": {
+      "startupMs": {
+        "min": 2388.9000000059605,
+        "median": 2539.9500000029802,
+        "mean": 2563.3250000029802,
+        "max": 2784.5
+      },
+      "seekMs": {
+        "min": 106,
+        "median": 109.94999999925494,
+        "mean": 109.19999999925494,
+        "max": 110.89999999850988
+      },
+      "sustainedMiBps": {
+        "min": 72.13735172215894,
+        "median": 73.83671162519641,
+        "mean": 73.55805509962696,
+        "max": 74.42144542595608
+      },
+      "hostCpuMsPerMiB": {
+        "min": 27.050655325342074,
+        "median": 27.522429953488405,
+        "mean": 27.492231866188547,
+        "max": 27.8734122324353
+      },
+      "guestCpuMsPerMiB": {
+        "min": 24.407812434553545,
+        "median": 24.756808774662716,
+        "mean": 24.800127137264596,
+        "max": 25.279078565179397
+      },
+      "messagesPerRun": 1911,
+      "integrityOk": true
+    },
+    "meta256-legacyWrite": {
+      "startupMs": {
+        "min": 1964.1999999955297,
+        "median": 2379.14999999851,
+        "mean": 2277.974999997765,
+        "max": 2389.39999999851
+      },
+      "seekMs": {
+        "min": 108.60000000149012,
+        "median": 109.75000000372529,
+        "mean": 109.70000000298023,
+        "max": 110.70000000298023
+      },
+      "sustainedMiBps": {
+        "min": 73.47661057269691,
+        "median": 73.82448961876531,
+        "mean": 73.85289496312761,
+        "max": 74.2859900422829
+      },
+      "hostCpuMsPerMiB": {
+        "min": 27.072873518022927,
+        "median": 27.161894287654533,
+        "mean": 27.198274484386456,
+        "max": 27.39643584421383
+      },
+      "guestCpuMsPerMiB": {
+        "min": 24.42573062794861,
+        "median": 24.505455001045437,
+        "mean": 24.51447088802171,
+        "max": 24.621242922047358
+      },
+      "messagesPerRun": 3600,
+      "integrityOk": true
+    }
+  },
+  "results": [
+    {
+      "mode": "legacy",
+      "round": 1,
+      "startupMs": 2400.39999999851,
+      "seekMs": 115.40000000596046,
+      "sustainedMiBps": 71.05288442605037,
+      "totalMessages": 7086,
+      "hostCpuMsPerMiB": 28.846205614073327,
+      "guestCpuMsPerMiB": 26.7877541950516,
+      "integrityOk": true
+    },
+    {
+      "mode": "current",
+      "round": 1,
+      "startupMs": 2394,
+      "seekMs": 111.70000000298023,
+      "sustainedMiBps": 71.59035736870204,
+      "totalMessages": 1911,
+      "hostCpuMsPerMiB": 28.041538992128853,
+      "guestCpuMsPerMiB": 23.65671453370039,
+      "integrityOk": true
+    },
+    {
+      "mode": "header128-currentWrite",
+      "round": 1,
+      "startupMs": 2815.4000000059605,
+      "seekMs": 115.19999999552965,
+      "sustainedMiBps": 69.98928689198272,
+      "totalMessages": 3654,
+      "hostCpuMsPerMiB": 29.049328952798994,
+      "guestCpuMsPerMiB": 24.62812659219534,
+      "integrityOk": true
+    },
+    {
+      "mode": "meta128-currentWrite",
+      "round": 1,
+      "startupMs": 2417.39999999851,
+      "seekMs": 114.10000000149012,
+      "sustainedMiBps": 70.4106287632211,
+      "totalMessages": 7086,
+      "hostCpuMsPerMiB": 29.126499484270926,
+      "guestCpuMsPerMiB": 24.691073166584907,
+      "integrityOk": true
+    },
+    {
+      "mode": "header256-legacyWrite",
+      "round": 1,
+      "startupMs": 2388.9000000059605,
+      "seekMs": 110.19999999552965,
+      "sustainedMiBps": 74.42144542595608,
+      "totalMessages": 1911,
+      "hostCpuMsPerMiB": 27.050655325342074,
+      "guestCpuMsPerMiB": 24.407812434553545,
+      "integrityOk": true
+    },
+    {
+      "mode": "meta256-legacyWrite",
+      "round": 1,
+      "startupMs": 1964.1999999955297,
+      "seekMs": 108.90000000596046,
+      "sustainedMiBps": 73.47661057269691,
+      "totalMessages": 3600,
+      "hostCpuMsPerMiB": 27.189294736678423,
+      "guestCpuMsPerMiB": 24.52109011050816,
+      "integrityOk": true
+    },
+    {
+      "mode": "meta256-legacyWrite",
+      "round": 2,
+      "startupMs": 2383.39999999851,
+      "seekMs": 110.60000000149012,
+      "sustainedMiBps": 74.2859900422829,
+      "totalMessages": 3600,
+      "hostCpuMsPerMiB": 27.072873518022927,
+      "guestCpuMsPerMiB": 24.42573062794861,
+      "integrityOk": true
+    },
+    {
+      "mode": "header256-legacyWrite",
+      "round": 2,
+      "startupMs": 2784.5,
+      "seekMs": 109.70000000298023,
+      "sustainedMiBps": 73.75461672295312,
+      "totalMessages": 1911,
+      "hostCpuMsPerMiB": 27.294270706434645,
+      "guestCpuMsPerMiB": 24.63478998489856,
+      "integrityOk": true
+    },
+    {
+      "mode": "meta128-currentWrite",
+      "round": 2,
+      "startupMs": 2797.2999999970198,
+      "seekMs": 115.20000000298023,
+      "sustainedMiBps": 69.86822623067644,
+      "totalMessages": 7086,
+      "hostCpuMsPerMiB": 29.21893570157426,
+      "guestCpuMsPerMiB": 24.81385489645713,
+      "integrityOk": true
+    },
+    {
+      "mode": "header128-currentWrite",
+      "round": 2,
+      "startupMs": 2430.9000000059605,
+      "seekMs": 113.19999999552965,
+      "sustainedMiBps": 70.45240872424412,
+      "totalMessages": 3654,
+      "hostCpuMsPerMiB": 29.09592910514392,
+      "guestCpuMsPerMiB": 24.6627216238022,
+      "integrityOk": true
+    },
+    {
+      "mode": "current",
+      "round": 2,
+      "startupMs": 2811.60000000149,
+      "seekMs": 113.89999999850988,
+      "sustainedMiBps": 71.2337331610451,
+      "totalMessages": 1911,
+      "hostCpuMsPerMiB": 27.986935425958556,
+      "guestCpuMsPerMiB": 23.713497928750833,
+      "integrityOk": true
+    },
+    {
+      "mode": "legacy",
+      "round": 2,
+      "startupMs": 3210.7000000029802,
+      "seekMs": 115.60000000149012,
+      "sustainedMiBps": 67.73984299697538,
+      "totalMessages": 7086,
+      "hostCpuMsPerMiB": 29.979209534734647,
+      "guestCpuMsPerMiB": 27.679960450267515,
+      "integrityOk": true
+    },
+    {
+      "mode": "legacy",
+      "round": 3,
+      "startupMs": 2799.7000000029802,
+      "seekMs": 111.79999999701977,
+      "sustainedMiBps": 71.2220794864101,
+      "totalMessages": 7086,
+      "hostCpuMsPerMiB": 28.7490081915843,
+      "guestCpuMsPerMiB": 26.619361266779045,
+      "integrityOk": true
+    },
+    {
+      "mode": "current",
+      "round": 3,
+      "startupMs": 2405.3000000044703,
+      "seekMs": 110,
+      "sustainedMiBps": 71.77001188414634,
+      "totalMessages": 1911,
+      "hostCpuMsPerMiB": 27.894985654678955,
+      "guestCpuMsPerMiB": 23.706788644913217,
+      "integrityOk": true
+    },
+    {
+      "mode": "header128-currentWrite",
+      "round": 3,
+      "startupMs": 2792,
+      "seekMs": 114.60000000149012,
+      "sustainedMiBps": 66.69061392645295,
+      "totalMessages": 3654,
+      "hostCpuMsPerMiB": 30.294428852706268,
+      "guestCpuMsPerMiB": 25.85587505421637,
+      "integrityOk": true
+    },
+    {
+      "mode": "meta128-currentWrite",
+      "round": 3,
+      "startupMs": 2404.5,
+      "seekMs": 114.10000000149012,
+      "sustainedMiBps": 69.5161765482876,
+      "totalMessages": 7086,
+      "hostCpuMsPerMiB": 29.37022500408594,
+      "guestCpuMsPerMiB": 25.046059447001127,
+      "integrityOk": true
+    },
+    {
+      "mode": "header256-legacyWrite",
+      "round": 3,
+      "startupMs": 2675.2000000029802,
+      "seekMs": 106,
+      "sustainedMiBps": 73.9188065274397,
+      "totalMessages": 1911,
+      "hostCpuMsPerMiB": 27.8734122324353,
+      "guestCpuMsPerMiB": 25.279078565179397,
+      "integrityOk": true
+    },
+    {
+      "mode": "meta256-legacyWrite",
+      "round": 3,
+      "startupMs": 2374.89999999851,
+      "seekMs": 108.60000000149012,
+      "sustainedMiBps": 73.99418829858848,
+      "totalMessages": 3600,
+      "hostCpuMsPerMiB": 27.134493838630643,
+      "guestCpuMsPerMiB": 24.489819891582716,
+      "integrityOk": true
+    },
+    {
+      "mode": "meta256-legacyWrite",
+      "round": 4,
+      "startupMs": 2389.39999999851,
+      "seekMs": 110.70000000298023,
+      "sustainedMiBps": 73.65479093894213,
+      "totalMessages": 3600,
+      "hostCpuMsPerMiB": 27.39643584421383,
+      "guestCpuMsPerMiB": 24.621242922047358,
+      "integrityOk": true
+    },
+    {
+      "mode": "header256-legacyWrite",
+      "round": 4,
+      "startupMs": 2404.7000000029802,
+      "seekMs": 110.89999999850988,
+      "sustainedMiBps": 72.13735172215894,
+      "totalMessages": 1911,
+      "hostCpuMsPerMiB": 27.750589200542166,
+      "guestCpuMsPerMiB": 24.878827564426874,
+      "integrityOk": true
+    },
+    {
+      "mode": "meta128-currentWrite",
+      "round": 4,
+      "startupMs": 2400.2999999970198,
+      "seekMs": 115.70000000298023,
+      "sustainedMiBps": 69.44594574245059,
+      "totalMessages": 7086,
+      "hostCpuMsPerMiB": 29.310086967116753,
+      "guestCpuMsPerMiB": 24.828930134081162,
+      "integrityOk": true
+    },
+    {
+      "mode": "header128-currentWrite",
+      "round": 4,
+      "startupMs": 2413.60000000149,
+      "seekMs": 116.5,
+      "sustainedMiBps": 69.83709287733679,
+      "totalMessages": 3654,
+      "hostCpuMsPerMiB": 29.209085169592633,
+      "guestCpuMsPerMiB": 24.706352619756665,
+      "integrityOk": true
+    },
+    {
+      "mode": "current",
+      "round": 4,
+      "startupMs": 2363.6999999955297,
+      "seekMs": 111.60000000149012,
+      "sustainedMiBps": 72.1984974624581,
+      "totalMessages": 1911,
+      "hostCpuMsPerMiB": 27.768098962841968,
+      "guestCpuMsPerMiB": 23.554014764206457,
+      "integrityOk": true
+    },
+    {
+      "mode": "legacy",
+      "round": 4,
+      "startupMs": 2385.10000000149,
+      "seekMs": 111.29999999701977,
+      "sustainedMiBps": 70.75776102123952,
+      "totalMessages": 7086,
+      "hostCpuMsPerMiB": 28.916843542574764,
+      "guestCpuMsPerMiB": 26.79962852605675,
+      "integrityOk": true
+    }
+  ]
+}

@@ -49,12 +49,13 @@ type RemotePlaybackCommand =
       receivedAt: number;
     };
 
-type PeerSignal =
+export type PeerSignal =
   | {
       type: "peer_offer";
       roomId: string;
       sourceParticipantId: string;
       sdp: RTCSessionDescriptionInit;
+      lane?: number;
       receivedAt: number;
     }
   | {
@@ -62,6 +63,7 @@ type PeerSignal =
       roomId: string;
       sourceParticipantId: string;
       sdp: RTCSessionDescriptionInit;
+      lane?: number;
       receivedAt: number;
     }
   | {
@@ -69,8 +71,15 @@ type PeerSignal =
       roomId: string;
       sourceParticipantId: string;
       candidate: RTCIceCandidateInit;
+      lane?: number;
       receivedAt: number;
     };
+
+export type PeerSignalListener = (signal: PeerSignal) => void;
+
+// Signals that arrive before the player subscribes (e.g. an offer sent while
+// the room view mounts) are kept briefly instead of dropped.
+const MAX_BUFFERED_PEER_SIGNALS = 200;
 
 function buildGuestName() {
   const savedName = localStorage.getItem("syncplay:display-name");
@@ -88,7 +97,11 @@ export function useRoomConnection() {
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("connecting");
   const [room, setRoom] = useState<RoomState | null>(null);
   const [remoteCommand, setRemoteCommand] = useState<RemotePlaybackCommand | null>(null);
-  const [peerSignal, setPeerSignal] = useState<PeerSignal | null>(null);
+  // Peer signals are delivered through listeners rather than React state:
+  // several WebSocket messages can arrive before React renders, and storing
+  // each one in state would keep only the last (dropping offers/candidates).
+  const peerSignalListenersRef = useRef(new Set<PeerSignalListener>());
+  const bufferedPeerSignalsRef = useRef<PeerSignal[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [chatRateLimitEndsAt, setChatRateLimitEndsAt] = useState<number | null>(null);
   const [selfId, setSelfId] = useState<string | null>(null);
@@ -117,6 +130,33 @@ export function useRoomConnection() {
     setDisplayNameState(trimmedValue);
     displayNameRef.current = trimmedValue;
     localStorage.setItem("syncplay:display-name", trimmedValue);
+  }, []);
+
+  const dispatchPeerSignal = useCallback((signal: PeerSignal) => {
+    const listeners = peerSignalListenersRef.current;
+
+    if (listeners.size === 0) {
+      bufferedPeerSignalsRef.current = [...bufferedPeerSignalsRef.current, signal].slice(-MAX_BUFFERED_PEER_SIGNALS);
+      return;
+    }
+
+    for (const listener of listeners) {
+      listener(signal);
+    }
+  }, []);
+
+  const subscribeToPeerSignals = useCallback((listener: PeerSignalListener) => {
+    peerSignalListenersRef.current.add(listener);
+    const buffered = bufferedPeerSignalsRef.current;
+    bufferedPeerSignalsRef.current = [];
+
+    for (const signal of buffered) {
+      listener(signal);
+    }
+
+    return () => {
+      peerSignalListenersRef.current.delete(listener);
+    };
   }, []);
 
   const handleServerEvent = useCallback((event: ServerEvent) => {
@@ -203,32 +243,20 @@ export function useRoomConnection() {
         setLastActionLabel(`${event.payload.action.replace("player_", "")} @ ${event.payload.room.currentTime.toFixed(1)}s`);
         return;
       case "peer_offer":
-        setPeerSignal({
-          type: "peer_offer",
-          ...event.payload,
-          receivedAt: Date.now()
-        });
-        return;
       case "peer_answer":
-        setPeerSignal({
-          type: "peer_answer",
-          ...event.payload,
-          receivedAt: Date.now()
-        });
-        return;
       case "peer_ice_candidate":
-        setPeerSignal({
-          type: "peer_ice_candidate",
+        dispatchPeerSignal({
+          type: event.type,
           ...event.payload,
           receivedAt: Date.now()
-        });
+        } as PeerSignal);
         return;
       case "host_disconnected":
         roomRef.current = null;
         pendingLeaveRoomIdRef.current = event.payload.roomId;
         setError(event.payload.message);
         setRoom(null);
-        setPeerSignal(null);
+        bufferedPeerSignalsRef.current = [];
         return;
       case "server_error": {
         if (event.payload.message === "Room not found." && !roomRef.current && pendingLeaveRoomIdRef.current) {
@@ -247,7 +275,7 @@ export function useRoomConnection() {
         return;
       }
     }
-  }, [pushDebugEntry]);
+  }, [dispatchPeerSignal, pushDebugEntry]);
 
   useEffect(() => {
     if (chatRateLimitEndsAt === null) {
@@ -397,7 +425,7 @@ export function useRoomConnection() {
       }
     });
     setRoom(null);
-    setPeerSignal(null);
+    bufferedPeerSignalsRef.current = [];
     setRemoteCommand(null);
   }, [send]);
 
@@ -456,7 +484,7 @@ export function useRoomConnection() {
   );
 
   const sendPeerOffer = useCallback(
-    (targetParticipantId: string, sdp: RTCSessionDescriptionInit) => {
+    (targetParticipantId: string, sdp: RTCSessionDescriptionInit, lane?: number) => {
       const currentRoom = roomRef.current;
 
       if (!currentRoom) {
@@ -468,7 +496,8 @@ export function useRoomConnection() {
         payload: {
           roomId: currentRoom.roomId,
           targetParticipantId,
-          sdp
+          sdp,
+          lane
         }
       });
     },
@@ -476,7 +505,7 @@ export function useRoomConnection() {
   );
 
   const sendPeerAnswer = useCallback(
-    (targetParticipantId: string, sdp: RTCSessionDescriptionInit) => {
+    (targetParticipantId: string, sdp: RTCSessionDescriptionInit, lane?: number) => {
       const currentRoom = roomRef.current;
 
       if (!currentRoom) {
@@ -488,7 +517,8 @@ export function useRoomConnection() {
         payload: {
           roomId: currentRoom.roomId,
           targetParticipantId,
-          sdp
+          sdp,
+          lane
         }
       });
     },
@@ -496,7 +526,7 @@ export function useRoomConnection() {
   );
 
   const sendPeerIceCandidate = useCallback(
-    (targetParticipantId: string, candidate: RTCIceCandidateInit) => {
+    (targetParticipantId: string, candidate: RTCIceCandidateInit, lane?: number) => {
       const currentRoom = roomRef.current;
 
       if (!currentRoom) {
@@ -508,7 +538,8 @@ export function useRoomConnection() {
         payload: {
           roomId: currentRoom.roomId,
           targetParticipantId,
-          candidate
+          candidate,
+          lane
         }
       });
     },
@@ -579,7 +610,7 @@ export function useRoomConnection() {
     room,
     participants,
     remoteCommand,
-    peerSignal,
+    subscribeToPeerSignals,
     error,
     selfId,
     displayName,

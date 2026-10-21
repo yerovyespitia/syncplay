@@ -1,0 +1,651 @@
+<!doctype html>
+<html>
+  <body>
+    <script>
+      const { ipcRenderer } = require("electron");
+
+      // Constants copied from LocalFileRoomPlayer.tsx (identical in both versions
+      // unless noted).
+      const MAX_DATA_CHANNEL_MESSAGE_BYTES = 256 * 1024; // current
+      const CHUNK_HEADER_BYTES = 8; // current
+      const REQUEST_WINDOW_BYTES = 8 * 1024 * 1024;
+      const TRAILING_METADATA_WINDOW_BYTES = 4 * 1024 * 1024;
+      const MAX_PREFETCH_INFLIGHT_REQUESTS = 4;
+      const DATA_CHANNEL_HIGH_WATER_MARK = 4 * 1024 * 1024;
+      const DATA_CHANNEL_LOW_WATER_MARK = 512 * 1024;
+      const STARTUP_BYTES = 32 * 1024 * 1024; // MAX_PROGRESSIVE_START_BYTES
+      const HOST_RECONNECT_DELAY_MS = 600; // handlePeerDisconnect
+      const PEER_CONNECT_TIMEOUT_MS = 10_000; // watchdog for attempts that never connect
+
+      // Each variant toggles one dimension so differences can be attributed:
+      // chunk payload size, framing (JSON chunk-meta vs 8-byte header), the
+      // guest write path (open/close + mark IPC vs persistent handle), and the
+      // reconnect policy (tear down on "disconnected" vs ICE restart).
+      const CURRENT = { chunkBytes: "negotiated", framing: "header", write: "current", reconnect: "teardown-watchdog" };
+      const VARIANTS = {
+        legacy: { chunkBytes: 128 * 1024, framing: "meta", write: "legacy", reconnect: "teardown" },
+        "current-icerestart": { ...CURRENT, reconnect: "ice-restart" },
+        current: CURRENT,
+        lanes2: { ...CURRENT, lanes: 2 },
+        lanes3: { ...CURRENT, lanes: 3 },
+        lanes4: { ...CURRENT, lanes: 4 },
+        "header128-currentWrite": { ...CURRENT, chunkBytes: 128 * 1024 - 8 },
+        "meta128-currentWrite": { ...CURRENT, chunkBytes: 128 * 1024, framing: "meta" },
+        "header256-legacyWrite": { ...CURRENT, write: "legacy" },
+        "meta256-legacyWrite": { ...CURRENT, chunkBytes: 256 * 1024, framing: "meta", write: "legacy" }
+      };
+
+      const params = new URLSearchParams(location.search);
+      const role = params.get("role");
+      const log = (message) => ipcRenderer.send("bench:log", message);
+      const signal = (message) => ipcRenderer.send("bench:signal-out", message);
+      const yieldToUi = () => new Promise((resolve) => setTimeout(resolve, 0));
+      const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      const signalHandlers = [];
+      ipcRenderer.on("bench:signal", (_, message) => {
+        for (const handler of [...signalHandlers]) handler(message);
+      });
+      const nextSignal = (predicate) =>
+        new Promise((resolve) => {
+          const handler = (message) => {
+            if (!predicate(message)) return;
+            signalHandlers.splice(signalHandlers.indexOf(handler), 1);
+            resolve(message);
+          };
+          signalHandlers.push(handler);
+        });
+
+      function waitForChannelDrain(channel) {
+        channel.bufferedAmountLowThreshold = DATA_CHANNEL_LOW_WATER_MARK;
+        if (channel.bufferedAmount <= DATA_CHANNEL_LOW_WATER_MARK) return Promise.resolve();
+        return new Promise((resolve) => {
+          const done = () => resolve();
+          channel.addEventListener("bufferedamountlow", done, { once: true });
+          channel.addEventListener("close", done, { once: true });
+        });
+      }
+
+      function getChunkPayloadBytes(peer) {
+        const negotiatedMax = peer?.sctp?.maxMessageSize || MAX_DATA_CHANNEL_MESSAGE_BYTES;
+        return Math.min(negotiatedMax, MAX_DATA_CHANNEL_MESSAGE_BYTES) - CHUNK_HEADER_BYTES;
+      }
+
+      function encodeChunkMessage(startByte, chunk) {
+        const message = new Uint8Array(CHUNK_HEADER_BYTES + chunk.byteLength);
+        new DataView(message.buffer).setFloat64(0, startByte);
+        message.set(chunk, CHUNK_HEADER_BYTES);
+        return message;
+      }
+
+      function decodeChunkMessage(payload) {
+        if (payload.byteLength <= CHUNK_HEADER_BYTES) return null;
+        const startByte = new DataView(payload).getFloat64(0);
+        if (!Number.isSafeInteger(startByte) || startByte < 0) return null;
+        return { startByte, chunk: new Uint8Array(payload, CHUNK_HEADER_BYTES) };
+      }
+
+      // ---------------------------------------------------------------- host --
+      // Mirrors createHostPeer / handlePeerDisconnect / sendRequestedRange.
+      async function runHost() {
+        const { fileSize } = await ipcRenderer.invoke("bench:file-info");
+        const sessions = new Map();
+
+        function createHostPeer(session) {
+          const state = sessions.get(session);
+          state.peer?.close();
+          state.generation += 1;
+          const generation = state.generation;
+          const peer = new RTCPeerConnection({ iceServers: [] });
+          state.peer = peer;
+          peer.onicecandidate = (event) =>
+            event.candidate && signal({ type: "candidate", from: "host", session, generation, candidate: event.candidate.toJSON() });
+          peer.onconnectionstatechange = () => {
+            if (state.peer !== peer || state.closed) return;
+            const reconnect = VARIANTS[state.mode].reconnect;
+            if (peer.connectionState === "disconnected" && reconnect === "ice-restart") {
+              void restartIce(session, peer, generation);
+            } else if (peer.connectionState === "failed" || (peer.connectionState === "disconnected" && reconnect !== "ice-restart")) {
+              peer.close();
+              setTimeout(() => !state.closed && state.peer === peer && createHostPeer(session), HOST_RECONNECT_DELAY_MS);
+            }
+          };
+          if (VARIANTS[state.mode].reconnect === "teardown-watchdog") {
+            setTimeout(() => {
+              if (!state.closed && state.peer === peer && peer.connectionState !== "connected") createHostPeer(session);
+            }, PEER_CONNECT_TIMEOUT_MS);
+          }
+          const channel = peer.createDataChannel("syncplay-file");
+          attachHost(peer, channel, fileSize);
+          void (async () => {
+            const offer = await peer.createOffer();
+            await peer.setLocalDescription(offer);
+            signal({ type: "offer", session, generation, sdp: offer });
+          })();
+        }
+
+        async function restartIce(session, peer, generation) {
+          if (peer.signalingState !== "stable") return;
+          const offer = await peer.createOffer({ iceRestart: true });
+          await peer.setLocalDescription(offer);
+          signal({ type: "offer", session, generation, sdp: offer, iceRestart: true });
+        }
+
+        signalHandlers.push(async (message) => {
+          const state = sessions.get(message.session);
+          if (message.type === "join") {
+            sessions.set(message.session, { mode: message.mode, generation: 0, peer: null, closed: false });
+            createHostPeer(message.session);
+          } else if (message.type === "answer" && state && message.generation === state.generation) {
+            await state.peer.setRemoteDescription(message.sdp).catch((error) => log(`answer failed: ${error}`));
+          } else if (message.type === "candidate" && message.from === "guest" && state && message.generation === state.generation) {
+            await state.peer.addIceCandidate(message.candidate).catch(() => undefined);
+          } else if (message.type === "close-session" && state) {
+            state.closed = true;
+            state.peer?.close();
+            sessions.delete(message.session);
+          } else if (message.type === "cpu-request") {
+            signal({ type: "cpu", id: message.id, seconds: await ipcRenderer.invoke("bench:cpu-seconds") });
+          } else if (message.type === "shutdown") {
+            ipcRenderer.send("bench:exit");
+          }
+        });
+      }
+
+      function attachHost(peer, channel, fileSize) {
+        channel.binaryType = "arraybuffer";
+        channel.onmessage = (event) => {
+          const message = JSON.parse(event.data);
+          if (message.type === "range-request") void sendRequestedRange(message).catch(() => undefined);
+          if (message.type === "raw-blast") void sendRawBlast(message.bytes, message.messageBytes);
+        };
+
+        // Transport-only test: no IPC, no disk, just messages under backpressure.
+        async function sendRawBlast(totalBytes, messageBytes) {
+          const payload = new Uint8Array(messageBytes);
+          for (let sent = 0; sent < totalBytes; sent += messageBytes) {
+            channel.send(payload);
+            if (channel.bufferedAmount > DATA_CHANNEL_HIGH_WATER_MARK) await waitForChannelDrain(channel);
+          }
+        }
+
+        async function sendRequestedRange(request) {
+          const variant = VARIANTS[request.variant];
+          channel.send(JSON.stringify({ type: "file-start", fileName: "bench.mp4", fileSize, mimeType: "video/mp4", mediaId: "bench" }));
+          let offset = request.startByte;
+          let chunksSinceYield = 0;
+          const chunkPayloadBytes = variant.chunkBytes === "negotiated" ? getChunkPayloadBytes(peer) : variant.chunkBytes;
+
+          while (offset < request.endByte && channel.readyState === "open") {
+            const length = Math.min(chunkPayloadBytes, request.endByte - offset);
+            const chunk = new Uint8Array(await ipcRenderer.invoke("bench:read-chunk", offset, length));
+            if (chunk.byteLength === 0) break;
+            const endByte = offset + chunk.byteLength;
+
+            if (variant.framing === "meta") {
+              channel.send(JSON.stringify({ type: "chunk-meta", startByte: offset, endByte }));
+              channel.send(Uint8Array.from(chunk));
+            } else {
+              channel.send(encodeChunkMessage(offset, chunk));
+            }
+
+            offset = endByte;
+            chunksSinceYield += 1;
+            if (channel.bufferedAmount > DATA_CHANNEL_HIGH_WATER_MARK) {
+              await waitForChannelDrain(channel);
+            } else if (chunksSinceYield >= 8) {
+              chunksSinceYield = 0;
+              await yieldToUi();
+            }
+          }
+
+          channel.send(JSON.stringify({ type: "range-complete", startByte: request.startByte, endByte: offset, reason: request.reason }));
+        }
+      }
+
+      // --------------------------------------------------------------- guest --
+      let sessionCounter = 0;
+      let cpuRequestCounter = 0;
+
+      async function hostCpuSeconds() {
+        const id = ++cpuRequestCounter;
+        const reply = nextSignal((message) => message.type === "cpu" && message.id === id);
+        signal({ type: "cpu-request", id });
+        return (await reply).seconds;
+      }
+
+      // One guest "room session" over `lanes` independent peer connections.
+      // Written ranges are shared; range requests are queued and handed to the
+      // lane with spare capacity. When a lane drops, its unfinished windows go
+      // back to the queue so other lanes (or the reconnected lane) pick them up,
+      // re-requesting only bytes that are still missing.
+      function createGuestSession(mode, cacheId) {
+        const variant = VARIANTS[mode];
+        const laneCount = variant.lanes ?? 1;
+        const perLaneCap = laneCount === 1 ? MAX_PREFETCH_INFLIGHT_REQUESTS : 2;
+        const baseSession = ++sessionCounter * 100;
+        let pendingBinaryChunkTask = Promise.resolve();
+        let writtenRanges = [];
+        const byteWaiters = [];
+        const pendingWindows = [];
+        const events = { channelOpens: 0, peersCreated: 0, iceRestarts: 0, bytesReceived: 0 };
+        let openResolvers = [];
+        let closed = false;
+
+        function coversRange(startByte, endByte) {
+          return writtenRanges.some((range) => range.startByte <= startByte && range.endByte >= endByte);
+        }
+
+        function writtenEndFrom(startByte) {
+          const range = writtenRanges.find((candidate) => candidate.startByte <= startByte && candidate.endByte > startByte);
+          return range ? range.endByte : startByte;
+        }
+
+        function noteWritten(startByte, endByte) {
+          const next = [...writtenRanges, { startByte, endByte }].sort((a, b) => a.startByte - b.startByte);
+          writtenRanges = [];
+          for (const range of next) {
+            const last = writtenRanges[writtenRanges.length - 1];
+            if (!last || range.startByte > last.endByte) writtenRanges.push({ ...range });
+            else last.endByte = Math.max(last.endByte, range.endByte);
+          }
+          for (const waiter of [...byteWaiters]) {
+            if (coversRange(waiter.startByte, waiter.endByte)) {
+              byteWaiters.splice(byteWaiters.indexOf(waiter), 1);
+              waiter.resolve();
+            }
+          }
+        }
+
+        async function writeChunk(startByte, chunk) {
+          events.bytesReceived += chunk.byteLength;
+          if (variant.write === "legacy") {
+            await ipcRenderer.invoke("bench:legacy-write", cacheId, startByte, chunk);
+            await ipcRenderer.invoke("bench:legacy-mark", cacheId, startByte, startByte + chunk.byteLength);
+          } else {
+            await ipcRenderer.invoke("bench:current-write", cacheId, startByte, chunk);
+          }
+          noteWritten(startByte, startByte + chunk.byteLength);
+        }
+
+        const lanes = Array.from({ length: laneCount }, (_, index) => ({
+          index,
+          session: baseSession + index,
+          generation: 0,
+          peer: null,
+          channel: null,
+          pendingChunkMetaQueue: [],
+          pendingCandidates: [],
+          activeWindows: new Set()
+        }));
+        // Split windows across lanes so a single seek window uses all of them.
+        const windowBytes = Math.max(2 * 1024 * 1024, Math.floor(REQUEST_WINDOW_BYTES / laneCount));
+
+        function pump() {
+          for (const lane of lanes) {
+            while (lane.channel?.readyState === "open" && lane.activeWindows.size < perLaneCap && pendingWindows.length > 0) {
+              const window = pendingWindows.shift();
+              const startByte = writtenEndFrom(window.startByte);
+              if (startByte >= window.endByte) {
+                window.complete();
+                continue;
+              }
+              window.requestedFrom = startByte;
+              lane.activeWindows.add(window);
+              lane.channel.send(JSON.stringify({ type: "range-request", startByte, endByte: window.endByte, reason: window.reason, variant: mode }));
+            }
+          }
+        }
+
+        function requeueLaneWindows(lane) {
+          pendingWindows.unshift(...lane.activeWindows);
+          lane.activeWindows.clear();
+        }
+
+        function bindChannel(lane, channel) {
+          lane.channel = channel;
+          channel.binaryType = "arraybuffer";
+          lane.pendingChunkMetaQueue = [];
+          channel.onopen = () => {
+            events.channelOpens += 1;
+            pump();
+            const resolvers = openResolvers;
+            openResolvers = [];
+            for (const resolve of resolvers) resolve();
+          };
+          channel.onclose = () => {
+            if (lane.channel !== channel) return;
+            lane.channel = null;
+            requeueLaneWindows(lane);
+            pump();
+          };
+          channel.onmessage = (event) => {
+            if (lane.channel !== channel) return;
+            if (typeof event.data === "string") {
+              const message = JSON.parse(event.data);
+              if (message.type === "chunk-meta") {
+                lane.pendingChunkMetaQueue.push({ startByte: message.startByte, endByte: message.endByte });
+              } else if (message.type === "range-complete") {
+                for (const window of lane.activeWindows) {
+                  if (window.requestedFrom !== message.startByte) continue;
+                  lane.activeWindows.delete(window);
+                  // Wait for queued writes before judging whether bytes are missing.
+                  pendingBinaryChunkTask = pendingBinaryChunkTask.then(() => {
+                    if (writtenEndFrom(window.startByte) >= window.endByte) window.complete();
+                    else pendingWindows.unshift(window);
+                    pump();
+                  });
+                }
+              }
+              return;
+            }
+            let startByte;
+            let chunk;
+            if (variant.framing === "meta") {
+              const range = lane.pendingChunkMetaQueue.shift();
+              if (!range) return;
+              startByte = range.startByte;
+              chunk = new Uint8Array(event.data);
+            } else {
+              const decoded = decodeChunkMessage(event.data);
+              if (!decoded) return;
+              ({ startByte, chunk } = decoded);
+            }
+            pendingBinaryChunkTask = pendingBinaryChunkTask.then(() => writeChunk(startByte, chunk)).catch((error) => log(`chunk failed: ${error}`));
+          };
+        }
+
+        function teardownLane(lane) {
+          lane.peer?.close();
+          lane.peer = null;
+          if (lane.channel) {
+            lane.channel = null;
+            requeueLaneWindows(lane);
+          }
+          lane.pendingChunkMetaQueue = [];
+          pump();
+        }
+
+        const signalHandler = async (message) => {
+          const lane = lanes.find((candidate) => candidate.session === message.session);
+          if (!lane || closed) return;
+          if (message.type === "offer") {
+            if (message.generation !== lane.generation || !lane.peer) {
+              teardownLane(lane);
+              lane.generation = message.generation;
+              const peer = new RTCPeerConnection({ iceServers: [] });
+              lane.peer = peer;
+              events.peersCreated += 1;
+              const ownGeneration = lane.generation;
+              lane.pendingCandidates = lane.pendingCandidates.filter((entry) => entry.generation === ownGeneration);
+              peer.onicecandidate = (event) =>
+                event.candidate &&
+                signal({ type: "candidate", from: "guest", session: lane.session, generation: ownGeneration, candidate: event.candidate.toJSON() });
+              peer.ondatachannel = (event) => lane.peer === peer && bindChannel(lane, event.channel);
+              peer.onconnectionstatechange = () => {
+                if (lane.peer !== peer) return;
+                const state = peer.connectionState;
+                if (state === "failed" || (state === "disconnected" && variant.reconnect !== "ice-restart")) teardownLane(lane);
+              };
+            } else if (message.iceRestart) {
+              events.iceRestarts += 1;
+            }
+            const peer = lane.peer;
+            await peer.setRemoteDescription(message.sdp);
+            // Like flushPendingIceCandidates: apply candidates that raced the offer.
+            for (const entry of lane.pendingCandidates.splice(0)) await peer.addIceCandidate(entry.candidate).catch(() => undefined);
+            const answer = await lane.peer.createAnswer();
+            await lane.peer.setLocalDescription(answer);
+            signal({ type: "answer", session: lane.session, generation: lane.generation, sdp: answer });
+          } else if (message.type === "candidate" && message.from === "host" && message.generation === lane.generation && lane.peer) {
+            if (!lane.peer.remoteDescription) lane.pendingCandidates.push({ generation: message.generation, candidate: message.candidate });
+            else await lane.peer.addIceCandidate(message.candidate).catch(() => undefined);
+          } else if (message.type === "candidate" && message.from === "host" && message.generation > lane.generation) {
+            lane.pendingCandidates.push({ generation: message.generation, candidate: message.candidate });
+          }
+        };
+        signalHandlers.push(signalHandler);
+
+        // Resolves once every lane has an open data channel.
+        async function connect() {
+          const allOpen = new Promise((resolve) => {
+            const check = () => (lanes.every((lane) => lane.channel?.readyState === "open") ? resolve() : openResolvers.push(check));
+            openResolvers.push(check);
+          });
+          for (const lane of lanes) signal({ type: "join", session: lane.session, mode });
+          await allOpen;
+        }
+
+        function waitForBytes(startByte, endByte) {
+          if (coversRange(startByte, endByte)) return Promise.resolve();
+          return new Promise((resolve) => byteWaiters.push({ startByte, endByte, resolve }));
+        }
+
+        // Requests [startByte, endByte) in 8 MB windows (like
+        // maybeRequestProgressivePrefetch) and resolves once every byte has been
+        // written to the cache.
+        async function fetchRange(startByte, endByte, reason) {
+          const completions = [];
+          for (let offset = startByte; offset < endByte; offset += windowBytes) {
+            completions.push(
+              new Promise((resolve) => {
+                pendingWindows.push({ startByte: offset, endByte: Math.min(endByte, offset + windowBytes), reason, complete: resolve });
+              })
+            );
+          }
+          pump();
+          await Promise.all(completions);
+          await waitForBytes(startByte, endByte);
+        }
+
+        function close() {
+          closed = true;
+          signalHandlers.splice(signalHandlers.indexOf(signalHandler), 1);
+          for (const lane of lanes) {
+            lane.peer?.close();
+            signal({ type: "close-session", session: lane.session });
+          }
+        }
+
+        return {
+          connect,
+          fetchRange,
+          close,
+          events,
+          channel: () => lanes[0].channel,
+          writtenBytes: () => writtenRanges.reduce((sum, range) => sum + range.endByte - range.startByte, 0)
+        };
+      }
+
+      async function runThroughput(mode, fileSize, round, options) {
+        const cacheId = await ipcRenderer.invoke("bench:create-cache", mode);
+        const guest = createGuestSession(mode, cacheId);
+        const connectStart = performance.now();
+        await guest.connect();
+        const connectMs = performance.now() - connectStart;
+        const guestCpuStart = await ipcRenderer.invoke("bench:cpu-seconds");
+        const hostCpuStart = await hostCpuSeconds();
+
+        // 1. Startup: trailing MP4 metadata + first 32 MB, as the guest does on join.
+        const startupStart = performance.now();
+        await Promise.all([
+          guest.fetchRange(fileSize - TRAILING_METADATA_WINDOW_BYTES, fileSize, "metadata"),
+          guest.fetchRange(0, STARTUP_BYTES, "initial")
+        ]);
+        const startupMs = performance.now() - startupStart;
+
+        // 2. Seek: one 8 MB window at ~60% of the file.
+        const seekStartByte = Math.floor((fileSize * 0.6) / (1024 * 1024)) * 1024 * 1024;
+        const seekStart = performance.now();
+        await guest.fetchRange(seekStartByte, seekStartByte + REQUEST_WINDOW_BYTES, "seek");
+        const seekMs = performance.now() - seekStart;
+
+        // 3. Sustained: the next chunk of the file after the startup window.
+        const sustainedBytes = Math.min(options.sustainedBytes, seekStartByte - STARTUP_BYTES);
+        const sustainedStart = performance.now();
+        await guest.fetchRange(STARTUP_BYTES, STARTUP_BYTES + sustainedBytes, "sequential");
+        const sustainedMs = performance.now() - sustainedStart;
+
+        const guestCpu = (await ipcRenderer.invoke("bench:cpu-seconds")) - guestCpuStart;
+        const hostCpu = (await hostCpuSeconds()) - hostCpuStart;
+        const transferredMiB = (TRAILING_METADATA_WINDOW_BYTES + STARTUP_BYTES + REQUEST_WINDOW_BYTES + sustainedBytes) / (1024 * 1024);
+        guest.close();
+        await ipcRenderer.invoke("bench:verify-and-remove", cacheId, false);
+
+        return {
+          mode,
+          round,
+          connectMs,
+          startupMs,
+          seekMs,
+          sustainedMiBps: sustainedBytes / (1024 * 1024) / (sustainedMs / 1000),
+          hostCpuMsPerMiB: (hostCpu * 1000) / transferredMiB,
+          guestCpuMsPerMiB: (guestCpu * 1000) / transferredMiB
+        };
+      }
+
+      // Transfers a fixed range and cuts the network for `blackoutMs` once the
+      // first 4 MB have landed. Measures how long the transfer takes to resume.
+      async function runBlackout(mode, fileSize, round, options) {
+        const cacheId = await ipcRenderer.invoke("bench:create-cache", mode);
+        const guest = createGuestSession(mode, cacheId);
+        await guest.connect();
+        const targetBytes = options.blackoutTransferBytes;
+        const start = performance.now();
+        const transfer = guest.fetchRange(0, targetBytes, "initial");
+        while (guest.writtenBytes() < 4 * 1024 * 1024) await sleep(20);
+        const blackoutStart = performance.now();
+        const bytesAtBlackout = guest.writtenBytes();
+        signal({ type: "netem-blackout", ms: options.blackoutMs });
+        const blackoutEnd = blackoutStart + options.blackoutMs;
+
+        // Resume = first byte written after the network came back.
+        let resumedAt = null;
+        const resumeWatcher = (async () => {
+          await sleep(options.blackoutMs);
+          const writtenAtEnd = guest.writtenBytes();
+          while (resumedAt === null) {
+            if (guest.writtenBytes() > writtenAtEnd) resumedAt = performance.now();
+            await sleep(10);
+          }
+        })();
+        const timeoutMs = options.blackoutMs + 90_000;
+        const completed = await Promise.race([transfer.then(() => true), sleep(timeoutMs).then(() => false)]);
+        const totalMs = performance.now() - start;
+        resumedAt ??= completed ? performance.now() : null;
+        void resumeWatcher;
+        guest.close();
+        const verification = completed ? await ipcRenderer.invoke("bench:verify-and-remove", cacheId, true, targetBytes) : null;
+
+        return {
+          mode,
+          round,
+          blackoutMs: options.blackoutMs,
+          completed,
+          integrityOk: verification ? verification.identical : false,
+          resumeAfterNetworkBackMs: resumedAt === null ? null : resumedAt - blackoutEnd,
+          totalMs,
+          bytesAtBlackout,
+          redundantMiB: (guest.events.bytesReceived - targetBytes) / (1024 * 1024),
+          peersCreated: guest.events.peersCreated,
+          iceRestarts: guest.events.iceRestarts,
+          channelOpens: guest.events.channelOpens
+        };
+      }
+
+      // Transport-only throughput over `parallel` independent peer connections
+      // (each with its own SCTP association), splitting the bytes evenly.
+      async function runRaw(mode, fileSize, round, options) {
+        const parallel = mode.startsWith("parallel") ? Number(mode.slice("parallel".length)) : 1;
+        const protocolMode = mode === "legacy" ? "legacy" : "current";
+        const messageBytes = protocolMode === "legacy" ? 128 * 1024 : 256 * 1024 - 8;
+        const totalBytes = options.rawMiB * 1024 * 1024;
+        const perConnection = Math.ceil(totalBytes / parallel / messageBytes) * messageBytes;
+        const sessions = [];
+        for (let index = 0; index < parallel; index += 1) {
+          const cacheId = await ipcRenderer.invoke("bench:create-cache", mode);
+          const guest = createGuestSession(protocolMode, cacheId);
+          await guest.connect();
+          sessions.push({ guest, cacheId });
+        }
+        const start = performance.now();
+        await Promise.all(
+          sessions.map(({ guest }) => {
+            const channel = guest.channel();
+            let received = 0;
+            const done = new Promise((resolve) => {
+              channel.onmessage = (event) => {
+                received += event.data.byteLength;
+                if (received >= perConnection) resolve();
+              };
+            });
+            channel.send(JSON.stringify({ type: "raw-blast", bytes: perConnection, messageBytes }));
+            return done;
+          })
+        );
+        const ms = performance.now() - start;
+        for (const { guest, cacheId } of sessions) {
+          guest.close();
+          await ipcRenderer.invoke("bench:verify-and-remove", cacheId, false);
+        }
+        return { mode, round, rawMiBps: (perConnection * parallel) / (1024 * 1024) / (ms / 1000) };
+      }
+
+      function stats(values) {
+        const finite = values.filter((value) => Number.isFinite(value));
+        if (finite.length === 0) return null;
+        const sorted = [...finite].sort((a, b) => a - b);
+        const median = sorted.length % 2 ? sorted[(sorted.length - 1) / 2] : (sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2]) / 2;
+        const mean = finite.reduce((sum, value) => sum + value, 0) / finite.length;
+        return { n: finite.length, min: sorted[0], median, mean, max: sorted[sorted.length - 1] };
+      }
+
+      async function runGuest() {
+        const rounds = Number(params.get("rounds") || 5);
+        const modes = (params.get("variants") || "legacy,current").split(",");
+        const scenario = params.get("scenario") || "throughput";
+        const options = {
+          sustainedBytes: Number(params.get("sustainedMiB") || 1_000_000) * 1024 * 1024,
+          blackoutMs: Number(params.get("blackoutMs") || 5000),
+          blackoutTransferBytes: Number(params.get("blackoutTransferMiB") || 24) * 1024 * 1024,
+          rawMiB: Number(params.get("rawMiB") || 32)
+        };
+        const { fileSize } = await ipcRenderer.invoke("bench:file-info");
+        const run = { blackout: runBlackout, raw: runRaw, throughput: runThroughput }[scenario];
+        // Warm the OS page cache and the network path; not included in results.
+        if (scenario === "throughput") await run("current", fileSize, 0, { ...options, sustainedBytes: 8 * 1024 * 1024 });
+        const results = [];
+        for (let round = 1; round <= rounds; round += 1) {
+          // Alternate the order each round to cancel out drift.
+          const order = round % 2 ? modes : [...modes].reverse();
+          for (const mode of order) {
+            const result = await run(mode, fileSize, round, options);
+            log(JSON.stringify(result));
+            results.push(result);
+            await sleep(500);
+          }
+        }
+
+        const summary = {};
+        for (const mode of modes) {
+          const runs = results.filter((result) => result.mode === mode);
+          const metricNames = Object.keys(runs[0]).filter((key) => typeof runs[0][key] === "number" && key !== "round");
+          summary[mode] = Object.fromEntries(metricNames.map((name) => [name, stats(runs.map((run) => run[name]))]));
+          if ("completed" in runs[0]) {
+            summary[mode].completedRuns = runs.filter((run) => run.completed).length;
+            summary[mode].integrityOkRuns = runs.filter((run) => run.integrityOk).length;
+          }
+          summary[mode].runs = runs.length;
+        }
+        signal({ type: "shutdown" });
+        await ipcRenderer.invoke("bench:done", { generatedAt: new Date().toISOString(), scenario, fileSize, rounds, options, summary, results });
+      }
+
+      nextSignal((message) => message.type === "signaling-ready").then(() =>
+        (role === "host" ? runHost() : runGuest()).catch((error) => {
+          log(`benchmark failed: ${error?.stack ?? error}`);
+          ipcRenderer.invoke("bench:done", { summary: { error: String(error) }, results: [] });
+        })
+      );
+    </script>
+  </body>
+</html>

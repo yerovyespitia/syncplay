@@ -198,6 +198,27 @@ describe("syncplay server chat", () => {
     expect(errorEvent.payload.message).toBe("Missing torrent magnet metadata.");
   });
 
+  test("relays the peer connection lane with WebRTC signals", async () => {
+    const host = await openSocket(server.port, sockets);
+    const guest = await openSocket(server.port, sockets);
+    const created = await createLocalRoom(host, "Alice");
+    const joined = await joinRoom(guest, created.payload.room.roomId, "Bob");
+
+    host.send({
+      type: "peer_ice_candidate",
+      payload: {
+        roomId: created.payload.room.roomId,
+        targetParticipantId: joined.payload.selfId,
+        candidate: { candidate: "candidate:1 1 udp 1 10.0.0.1 5000 typ host" },
+        lane: 3
+      }
+    });
+
+    const relayed = await guest.nextEvent("peer_ice_candidate");
+    expect(relayed.payload.lane).toBe(3);
+    expect(relayed.payload.candidate.candidate).toContain("10.0.0.1");
+  });
+
   test("creates a relay session when a guest requests fallback for a local file room", async () => {
     const host = await openSocket(server.port, sockets);
     const guest = await openSocket(server.port, sockets);
@@ -275,6 +296,22 @@ describe("syncplay server chat", () => {
     };
     expect(status.contiguousBytes).toBe(uploadBytes.byteLength);
     expect(status.largestRequestedEndByte).toBeGreaterThanOrEqual(5);
+
+    const openEndedResponse = await fetch(`http://127.0.0.1:${server.port}${relaySession.playbackUrl}`, {
+      headers: {
+        range: "bytes=6-"
+      }
+    });
+    expect(openEndedResponse.status).toBe(206);
+    expect(openEndedResponse.headers.get("content-length")).toBe(String(uploadBytes.byteLength - 6));
+    expect(openEndedResponse.headers.get("content-range")).toBe(`bytes 6-${uploadBytes.byteLength - 1}/32`);
+    expect(await openEndedResponse.text()).toBe("relay");
+  });
+
+  test("exposes ICE servers to renderer origins", async () => {
+    const response = await fetch(`http://127.0.0.1:${server.port}/api/ice-servers`);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("access-control-allow-origin")).toBe("*");
   });
 });
 

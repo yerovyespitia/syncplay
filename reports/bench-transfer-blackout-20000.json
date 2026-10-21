@@ -1,0 +1,296 @@
+{
+  "generatedAt": "2026-10-21T04:47:28.003Z",
+  "scenario": "blackout",
+  "fileSize": 456984128,
+  "rounds": 2,
+  "options": {
+    "sustainedBytes": 1048576000000,
+    "blackoutMs": 20000,
+    "blackoutTransferBytes": 12582912,
+    "rawMiB": 32
+  },
+  "summary": {
+    "legacy": {
+      "blackoutMs": {
+        "n": 2,
+        "min": 20000,
+        "median": 20000,
+        "mean": 20000,
+        "max": 20000
+      },
+      "resumeAfterNetworkBackMs": {
+        "n": 2,
+        "min": 251.5,
+        "median": 263.3499999977648,
+        "mean": 263.3499999977648,
+        "max": 275.19999999552965
+      },
+      "totalMs": {
+        "n": 2,
+        "min": 29556.70000000298,
+        "median": 31885.25,
+        "mean": 31885.25,
+        "max": 34213.79999999702
+      },
+      "bytesAtBlackout": {
+        "n": 2,
+        "min": 4194304,
+        "median": 4194304,
+        "mean": 4194304,
+        "max": 4194304
+      },
+      "redundantMiB": {
+        "n": 2,
+        "min": 0,
+        "median": 0,
+        "mean": 0,
+        "max": 0
+      },
+      "peersCreated": {
+        "n": 2,
+        "min": 2,
+        "median": 2,
+        "mean": 2,
+        "max": 2
+      },
+      "iceRestarts": {
+        "n": 2,
+        "min": 0,
+        "median": 0,
+        "mean": 0,
+        "max": 0
+      },
+      "channelOpens": {
+        "n": 2,
+        "min": 2,
+        "median": 2,
+        "mean": 2,
+        "max": 2
+      },
+      "completedRuns": 2,
+      "integrityOkRuns": 2,
+      "runs": 2
+    },
+    "current-icerestart": {
+      "blackoutMs": {
+        "n": 2,
+        "min": 20000,
+        "median": 20000,
+        "mean": 20000,
+        "max": 20000
+      },
+      "resumeAfterNetworkBackMs": {
+        "n": 2,
+        "min": 382.5,
+        "median": 389.8999999985099,
+        "mean": 389.8999999985099,
+        "max": 397.29999999701977
+      },
+      "totalMs": {
+        "n": 2,
+        "min": 24194.09999999404,
+        "median": 29493.19999999553,
+        "mean": 29493.19999999553,
+        "max": 34792.29999999702
+      },
+      "bytesAtBlackout": {
+        "n": 2,
+        "min": 4456312,
+        "median": 4456312,
+        "mean": 4456312,
+        "max": 4456312
+      },
+      "redundantMiB": {
+        "n": 2,
+        "min": 0,
+        "median": 0,
+        "mean": 0,
+        "max": 0
+      },
+      "peersCreated": {
+        "n": 2,
+        "min": 2,
+        "median": 2,
+        "mean": 2,
+        "max": 2
+      },
+      "iceRestarts": {
+        "n": 2,
+        "min": 1,
+        "median": 1,
+        "mean": 1,
+        "max": 1
+      },
+      "channelOpens": {
+        "n": 2,
+        "min": 2,
+        "median": 2,
+        "mean": 2,
+        "max": 2
+      },
+      "completedRuns": 2,
+      "integrityOkRuns": 2,
+      "runs": 2
+    },
+    "lanes4": {
+      "blackoutMs": {
+        "n": 2,
+        "min": 20000,
+        "median": 20000,
+        "mean": 20000,
+        "max": 20000
+      },
+      "resumeAfterNetworkBackMs": {
+        "n": 2,
+        "min": 325.69999999552965,
+        "median": 333.2499999962747,
+        "mean": 333.2499999962747,
+        "max": 340.79999999701977
+      },
+      "totalMs": {
+        "n": 2,
+        "min": 23321.10000000149,
+        "median": 23392.550000000745,
+        "mean": 23392.550000000745,
+        "max": 23464
+      },
+      "bytesAtBlackout": {
+        "n": 2,
+        "min": 4456312,
+        "median": 4456312,
+        "mean": 4456312,
+        "max": 4456312
+      },
+      "redundantMiB": {
+        "n": 2,
+        "min": 0,
+        "median": 0,
+        "mean": 0,
+        "max": 0
+      },
+      "peersCreated": {
+        "n": 2,
+        "min": 12,
+        "median": 12,
+        "mean": 12,
+        "max": 12
+      },
+      "iceRestarts": {
+        "n": 2,
+        "min": 0,
+        "median": 0,
+        "mean": 0,
+        "max": 0
+      },
+      "channelOpens": {
+        "n": 2,
+        "min": 8,
+        "median": 8,
+        "mean": 8,
+        "max": 8
+      },
+      "completedRuns": 2,
+      "integrityOkRuns": 2,
+      "runs": 2
+    }
+  },
+  "results": [
+    {
+      "mode": "legacy",
+      "round": 1,
+      "blackoutMs": 20000,
+      "completed": true,
+      "integrityOk": true,
+      "resumeAfterNetworkBackMs": 275.19999999552965,
+      "totalMs": 29556.70000000298,
+      "bytesAtBlackout": 4194304,
+      "redundantMiB": 0,
+      "peersCreated": 2,
+      "iceRestarts": 0,
+      "channelOpens": 2
+    },
+    {
+      "mode": "current-icerestart",
+      "round": 1,
+      "blackoutMs": 20000,
+      "completed": true,
+      "integrityOk": true,
+      "resumeAfterNetworkBackMs": 397.29999999701977,
+      "totalMs": 24194.09999999404,
+      "bytesAtBlackout": 4456312,
+      "redundantMiB": 0,
+      "peersCreated": 2,
+      "iceRestarts": 1,
+      "channelOpens": 2
+    },
+    {
+      "mode": "lanes4",
+      "round": 1,
+      "blackoutMs": 20000,
+      "completed": true,
+      "integrityOk": true,
+      "resumeAfterNetworkBackMs": 340.79999999701977,
+      "totalMs": 23464,
+      "bytesAtBlackout": 4456312,
+      "redundantMiB": 0,
+      "peersCreated": 12,
+      "iceRestarts": 0,
+      "channelOpens": 8
+    },
+    {
+      "mode": "lanes4",
+      "round": 2,
+      "blackoutMs": 20000,
+      "completed": true,
+      "integrityOk": true,
+      "resumeAfterNetworkBackMs": 325.69999999552965,
+      "totalMs": 23321.10000000149,
+      "bytesAtBlackout": 4456312,
+      "redundantMiB": 0,
+      "peersCreated": 12,
+      "iceRestarts": 0,
+      "channelOpens": 8
+    },
+    {
+      "mode": "current-icerestart",
+      "round": 2,
+      "blackoutMs": 20000,
+      "completed": true,
+      "integrityOk": true,
+      "resumeAfterNetworkBackMs": 382.5,
+      "totalMs": 34792.29999999702,
+      "bytesAtBlackout": 4456312,
+      "redundantMiB": 0,
+      "peersCreated": 2,
+      "iceRestarts": 1,
+      "channelOpens": 2
+    },
+    {
+      "mode": "legacy",
+      "round": 2,
+      "blackoutMs": 20000,
+      "completed": true,
+      "integrityOk": true,
+      "resumeAfterNetworkBackMs": 251.5,
+      "totalMs": 34213.79999999702,
+      "bytesAtBlackout": 4194304,
+      "redundantMiB": 0,
+      "peersCreated": 2,
+      "iceRestarts": 0,
+      "channelOpens": 2
+    }
+  ],
+  "network": {
+    "rateMbps": 50,
+    "rttMs": 20,
+    "lossRate": 0,
+    "maxQueueMs": 30,
+    "proxyStats": {
+      "forwarded": 136888,
+      "droppedLoss": 0,
+      "droppedQueue": 14845,
+      "droppedBlackout": 3236
+    }
+  },
+  "chromiumUdpSendErrors": 0
+}

@@ -1,6 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, nativeImage, protocol, shell, type OpenDialogOptions } from "electron";
 import { electronApp, optimizer } from "@electron-toolkit/utils";
 import { promises as fs } from "node:fs";
+import type { FileHandle } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import os from "node:os";
@@ -75,6 +76,7 @@ interface MediaCacheSession {
   fileSize: number;
   availableRanges: ByteRange[];
   waiters: TempMediaWaiter[];
+  writeHandle?: Promise<FileHandle>;
 }
 
 interface TorrentSession {
@@ -546,6 +548,20 @@ function getMediaCacheIdFromPathname(pathname: string | undefined) {
   return decodeURIComponent(segments[1]);
 }
 
+function findMediaCacheIdByLocalFileId(localFileId: string | null) {
+  if (!localFileId) {
+    return null;
+  }
+
+  for (const [cacheId, session] of tempMediaCaches) {
+    if (session.localFileId === localFileId) {
+      return cacheId;
+    }
+  }
+
+  return null;
+}
+
 function getLocalFileIdFromPathname(pathname: string | undefined) {
   if (!pathname) {
     return null;
@@ -655,6 +671,8 @@ function destroyMediaCache(cacheId: string) {
   }
 
   session.waiters = [];
+  void session.writeHandle?.then((handle) => handle.close()).catch(() => undefined);
+  session.writeHandle = undefined;
   return session;
 }
 
@@ -822,7 +840,12 @@ async function handleMediaServerRequest(request: IncomingMessage, response: Serv
     }
   }
 
-  const cacheId = getMediaCacheIdFromPathname(requestUrl?.pathname);
+  // A guest's temp cache is also exposed as /local/<id>; serve it through the
+  // cache path so reads wait for bytes that haven't arrived yet instead of
+  // returning the sparse file's holes (zeros) to the media element.
+  const cacheId =
+    getMediaCacheIdFromPathname(requestUrl?.pathname) ??
+    findMediaCacheIdByLocalFileId(getLocalFileIdFromPathname(requestUrl?.pathname));
 
   if (!cacheId) {
     const localFileId = getLocalFileIdFromPathname(requestUrl?.pathname);
@@ -1382,24 +1405,11 @@ app.whenReady().then(() => {
       throw new Error("Temporary media cache not found.");
     }
 
-    const handle = await fs.open(session.filePath, "r+");
-
-    try {
-      const buffer = Buffer.from(bytes);
-      await handle.write(buffer, 0, buffer.length, offset);
-    } finally {
-      await handle.close();
-    }
-  });
-
-  ipcMain.handle("syncplay:mark-temp-media-range-available", async (_, cacheId: string, startByte: number, endByte: number) => {
-    const session = tempMediaCaches.get(cacheId);
-
-    if (!session) {
-      throw new Error("Temporary media cache not found.");
-    }
-
-    session.availableRanges = mergeRanges(session.availableRanges, { startByte, endByte });
+    session.writeHandle ??= fs.open(session.filePath, "r+");
+    const handle = await session.writeHandle;
+    const buffer = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    await handle.write(buffer, 0, buffer.length, offset);
+    session.availableRanges = mergeRanges(session.availableRanges, { startByte: offset, endByte: offset + buffer.length });
     resolveWaiters(session);
   });
 

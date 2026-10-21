@@ -333,3 +333,70 @@ Interpretation:
 - The original startup refactor introduced a real continuity problem for very large local files.
 - That continuity problem has now been resolved in end-to-end validation.
 - The guest can now start real playback of `The Net` at roughly `4%` transfer progress instead of only becoming truly watchable near completion.
+
+## 2026-10-20 Local File P2P: Lanes, Signaling And Cache Fixes
+
+### Setup
+
+- Media: generated 1080p H.264, 6 min, ~10.2 Mbps, `moov` at the end (`456,984,128` bytes).
+- "Old" = `HEAD` at `85776b2`; "New" = this change. Each version runs with its own server.
+- Real app runs: `electron-vite dev`, two windows (host + guest), fresh app per iteration.
+- Network: `scripts/bench-transfer/signaling-proxy.ts` rewrites ICE candidates so every
+  WebRTC packet crosses a user-space emulator (`netem.mjs`: bandwidth cap with FIFO
+  drop-tail queue, one-way delay, random loss, blackouts).
+- Viewer metrics come from `scripts/bench-transfer/probe-guest.mjs`, sampled every 500 ms:
+  join → playback (video advancing ≥ 1.5 s) and seconds frozen while the room plays
+  (first 60 s of playback).
+
+### What Was Wrong (measured)
+
+- A single data channel is limited by its SCTP association, not by our code: raw
+  throughput at 50 Mbps fell to 0.5 MiB/s at 60 ms RTT, below a 1080p bitrate.
+  Independent peer connections scale it (1 → 4: 0.5 → 3.3 MiB/s at 60 ms RTT).
+- Peer signals went through React state: React handles at most 2 per burst, so bursts of
+  3 / 5 / 12 signals lost 33% / 60% / 83% (`scripts/bench-signal-loss`). A queue loses 0%.
+- The guest's `/local/<id>` stream read the sparse cache file without waiting for
+  missing ranges, so out-of-order data reached `<video>` as zeros and froze playback.
+- After a long outage the reconnect attempt never reached "failed", so the room stayed
+  stuck (45 s outage: no recovery in 90 s).
+- ICE restart on "disconnected" recovered slower than tearing down (10 s outage:
+  3.7 s vs 0.37 s to resume), so it was dropped.
+- Framing/write-path changes alone: same throughput on loopback (~71 vs 72 MiB/s),
+  ~11% less guest CPU per MiB.
+
+### Real App Results (3 runs each)
+
+| Network | Version | Join → playback (median) | Frozen in first 60 s | Started |
+| --- | --- | ---: | --- | ---: |
+| A: 100 Mbps, 20 ms | Old | `19.7 s` | 0 / 0.5 / 0 s | 3/3 |
+| A: 100 Mbps, 20 ms | New | `5.1 s` | 0 / 0 / 0 s | 3/3 |
+| B: 30 Mbps, 80 ms, 0.1% loss | Old | `75.7 s` | 25 / 32 / 30 s | 3/3 |
+| B: 30 Mbps, 80 ms, 0.1% loss | New | `26.8 s` | 0 / 1.5 / 0 s | 3/3 |
+| C: 15 Mbps, 50 ms, 1% loss | Old | `115.5 s` | 0 / 12 / 0 s | 2/3 |
+| C: 15 Mbps, 50 ms, 1% loss | New | `24.2 s` | 36 / 23 / 21 s | 3/3 |
+
+B and C were run with the relay fallback disabled in both versions to measure P2P only.
+Profile C cannot sustain the bitrate: New starts ~5x sooner and then rebuffers; Old waits
+about two minutes (and once never started). Time to watch the first minute is still lower
+with New (~107 s vs ~176 s+).
+
+### Outage Recovery (`scripts/bench-transfer/run.mjs --scenario=blackout`, 50 Mbps, 20 ms)
+
+| Outage | Old (teardown) | ICE restart (rejected) | New (4 lanes + watchdog) |
+| --- | --- | --- | --- |
+| 10 s | resume `0.37 s`, total `24.5 s` | resume `3.7 s`, total `22.9 s` | resume `0.42 s`, total `13.6 s` |
+| 20 s | resume `0.26 s`, total `31.9 s` | resume `0.39 s`, total `29.5 s` | resume `0.33 s`, total `23.4 s` |
+| 45 s | never recovered (stuck after 136 s) | not run | resume `0.47 s`, total `48.7 s`, data verified |
+
+### Known Issue (pre-existing, not addressed)
+
+- When the relay fallback engages, guest playback freezes in both Old and New
+  (`Switching to optimized relay`, then `readyState` 0 for the rest of the run). It also
+  triggers easily: the threshold assumes a 12 Mbps bitrate (1.35x = 16.2 Mbps).
+
+### Reproduce
+
+- Transport benchmark: `node scripts/bench-transfer/run.mjs <file> --scenario=throughput|raw|blackout --variants=legacy,lanes4 --rate-mbps=30 --rtt-ms=80 --loss=0.001`
+- Real app: `scripts/bench-transfer/run-app-matrix.sh <file> 3 <old-app-dir> <new-app-dir>`
+  (both dirs need `LOCAL_FILE_SOURCE_ENABLED = true`)
+- Signal loss: `bun scripts/bench-signal-loss/run.ts 30 5`

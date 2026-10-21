@@ -182,7 +182,6 @@ const fallbackDesktopApi: DesktopApi = {
     localHttpUrl: ""
   }),
   writeTempMediaChunk: async () => undefined,
-  markTempMediaRangeAvailable: async () => undefined,
   waitForTempMediaRange: async () => ({
     availableEndByte: 0
   }),
@@ -222,7 +221,7 @@ export default function App() {
     connectionStatus,
     room,
     remoteCommand,
-    peerSignal,
+    subscribeToPeerSignals,
     error,
     selfId,
     displayName,
@@ -1082,7 +1081,7 @@ export default function App() {
           selfId={selfId}
           remoteCommand={remoteCommand}
           debugEntries={debugEntries}
-          peerSignal={peerSignal}
+          subscribeToPeerSignals={subscribeToPeerSignals}
           lastActionLabel={lastActionLabel}
           onLeave={() => {
             void handleLeaveRoom();

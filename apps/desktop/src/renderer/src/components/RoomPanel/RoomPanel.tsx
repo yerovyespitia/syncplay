@@ -9,7 +9,7 @@ import type {
   YoutubeMediaSource
 } from "@syncplay/shared";
 
-import type { DebugEntry } from "../../hooks/useRoomConnection";
+import type { DebugEntry, PeerSignalListener } from "../../hooks/useRoomConnection";
 import type { SelectedTorrentFileSource } from "../../lib/torrentSessionProvider";
 import { LocalFileRoomPlayer } from "../LocalFileRoomPlayer/LocalFileRoomPlayer";
 import { YouTubeRoomPlayer } from "../YouTubeRoomPlayer/YouTubeRoomPlayer";
@@ -30,29 +30,6 @@ type RemotePlaybackCommand =
       receivedAt: number;
     };
 
-type PeerSignal =
-  | {
-      type: "peer_offer";
-      roomId: string;
-      sourceParticipantId: string;
-      sdp: RTCSessionDescriptionInit;
-      receivedAt: number;
-    }
-  | {
-      type: "peer_answer";
-      roomId: string;
-      sourceParticipantId: string;
-      sdp: RTCSessionDescriptionInit;
-      receivedAt: number;
-    }
-  | {
-      type: "peer_ice_candidate";
-      roomId: string;
-      sourceParticipantId: string;
-      candidate: RTCIceCandidateInit;
-      receivedAt: number;
-    };
-
 interface RoomPanelProps {
   room: RoomState;
   localFile: SelectedTorrentFileSource | File | null;
@@ -60,7 +37,7 @@ interface RoomPanelProps {
   selfId: string | null;
   remoteCommand: RemotePlaybackCommand | null;
   debugEntries: DebugEntry[];
-  peerSignal: PeerSignal | null;
+  subscribeToPeerSignals: (listener: PeerSignalListener) => () => void;
   lastActionLabel: string;
   onLeave: () => void;
   onRequestSync: () => void;
@@ -69,9 +46,9 @@ interface RoomPanelProps {
   onPause: (currentTime: number) => void;
   onSeek: (currentTime: number) => void;
   onDebug: (entry: Omit<DebugEntry, "id" | "timestamp">) => void;
-  onPeerOffer: (targetParticipantId: string, sdp: RTCSessionDescriptionInit) => void;
-  onPeerAnswer: (targetParticipantId: string, sdp: RTCSessionDescriptionInit) => void;
-  onPeerIceCandidate: (targetParticipantId: string, candidate: RTCIceCandidateInit) => void;
+  onPeerOffer: (targetParticipantId: string, sdp: RTCSessionDescriptionInit, lane?: number) => void;
+  onPeerAnswer: (targetParticipantId: string, sdp: RTCSessionDescriptionInit, lane?: number) => void;
+  onPeerIceCandidate: (targetParticipantId: string, candidate: RTCIceCandidateInit, lane?: number) => void;
   onTransferState: (transferState: TransferState) => void;
   onSubtitleTrackChange: (subtitleTrack: SubtitleTrack) => void;
   onStartRelayFallback: (reason: "low_throughput" | "buffer_instability" | "manual_resync") => void;
@@ -160,7 +137,7 @@ export function RoomPanel({
   selfId,
   remoteCommand,
   debugEntries,
-  peerSignal,
+  subscribeToPeerSignals,
   lastActionLabel,
   onLeave,
   onRequestSync,
@@ -351,7 +328,7 @@ export function RoomPanel({
               isTheaterMode={isTheaterMode}
               showDebugInfo={showDebugLogs}
               remoteCommand={remoteCommand}
-              peerSignal={peerSignal}
+              subscribeToPeerSignals={subscribeToPeerSignals}
               showLoadingOverlay={showLoadingOverlay}
               loadingPercent={playbackReadyPercent}
               onDebug={onDebug}

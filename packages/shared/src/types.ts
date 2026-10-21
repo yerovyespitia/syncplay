@@ -183,6 +183,8 @@ export type ClientEvent =
         roomId: string;
         targetParticipantId: string;
         sdp: RTCSessionDescriptionInit;
+        /** Which parallel peer connection ("lane") this signal belongs to. */
+        lane?: number;
       };
     }
   | {
@@ -191,6 +193,8 @@ export type ClientEvent =
         roomId: string;
         targetParticipantId: string;
         sdp: RTCSessionDescriptionInit;
+        /** Which parallel peer connection ("lane") this signal belongs to. */
+        lane?: number;
       };
     }
   | {
@@ -199,6 +203,8 @@ export type ClientEvent =
         roomId: string;
         targetParticipantId: string;
         candidate: RTCIceCandidateInit;
+        /** Which parallel peer connection ("lane") this signal belongs to. */
+        lane?: number;
       };
     }
   | {
@@ -280,6 +286,8 @@ export type ServerEvent =
         roomId: string;
         sourceParticipantId: string;
         sdp: RTCSessionDescriptionInit;
+        /** Which parallel peer connection ("lane") this signal belongs to. */
+        lane?: number;
       };
     }
   | {
@@ -288,6 +296,8 @@ export type ServerEvent =
         roomId: string;
         sourceParticipantId: string;
         sdp: RTCSessionDescriptionInit;
+        /** Which parallel peer connection ("lane") this signal belongs to. */
+        lane?: number;
       };
     }
   | {
@@ -296,6 +306,8 @@ export type ServerEvent =
         roomId: string;
         sourceParticipantId: string;
         candidate: RTCIceCandidateInit;
+        /** Which parallel peer connection ("lane") this signal belongs to. */
+        lane?: number;
       };
     }
   | {
@@ -420,7 +432,6 @@ export interface DesktopApi {
   readLocalFileChunk(fileId: string, offset: number, length: number): Promise<Uint8Array>;
   createTempMediaCache(mediaId: string, metadata: TempMediaCacheMetadata): Promise<TempMediaCacheHandle>;
   writeTempMediaChunk(cacheId: string, offset: number, bytes: Uint8Array): Promise<void>;
-  markTempMediaRangeAvailable(cacheId: string, startByte: number, endByte: number): Promise<void>;
   waitForTempMediaRange(
     cacheId: string,
     startByte: number,

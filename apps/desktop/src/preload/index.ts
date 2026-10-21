@@ -19,8 +19,6 @@ contextBridge.exposeInMainWorld("syncplayDesktop", {
     ipcRenderer.invoke("syncplay:create-temp-media-cache", mediaId, metadata),
   writeTempMediaChunk: async (cacheId: string, offset: number, bytes: Uint8Array) =>
     ipcRenderer.invoke("syncplay:write-temp-media-chunk", cacheId, offset, bytes),
-  markTempMediaRangeAvailable: async (cacheId: string, startByte: number, endByte: number) =>
-    ipcRenderer.invoke("syncplay:mark-temp-media-range-available", cacheId, startByte, endByte),
   waitForTempMediaRange: async (cacheId: string, startByte: number, endByte: number, timeoutMs?: number) =>
     ipcRenderer.invoke("syncplay:wait-for-temp-media-range", cacheId, startByte, endByte, timeoutMs),
   getTempMediaStatus: async (cacheId: string) => ipcRenderer.invoke("syncplay:get-temp-media-status", cacheId),

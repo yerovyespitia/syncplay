@@ -17,6 +17,7 @@ import {
   buildUploadPath,
   parseRangeHeader
 } from "./local-media-relay";
+import { IceServerProvider } from "./ice-servers";
 import { RoomManager } from "./room-manager";
 import { ProgressivePenaltyLimiter, TokenBucketRateLimiter } from "./rate-limit";
 
@@ -66,7 +67,7 @@ function hasValidTorrentMediaSource(
   );
 }
 
-export function createSyncPlayServer(port = Number(process.env.PORT ?? 8787)) {
+export function createSyncPlayServer(port = Number(process.env.PORT ?? 8787), iceServerProvider = new IceServerProvider()) {
   const roomManager = new RoomManager();
   const roomMembers = new Map<string, Set<Bun.ServerWebSocket<SocketData>>>();
   const relayManager = new LocalMediaRelayManager();
@@ -79,6 +80,15 @@ export function createSyncPlayServer(port = Number(process.env.PORT ?? 8787)) {
 
       if (pathname === "/health") {
         return Response.json({ ok: true });
+      }
+
+      if (pathname === "/api/ice-servers" && request.method === "GET") {
+        return Response.json(await iceServerProvider.getIceServers(), {
+          headers: {
+            "Access-Control-Allow-Origin": "*",
+            "Cache-Control": "no-store"
+          }
+        });
       }
 
       if (pathname.startsWith("/api/local-media/")) {
@@ -402,6 +412,7 @@ export function createSyncPlayServer(port = Number(process.env.PORT ?? 8787)) {
           payload: {
             roomId: event.payload.roomId,
             sourceParticipantId: ws.data.participantId,
+            lane: event.payload.lane,
             ...(event.type === "peer_ice_candidate"
               ? { candidate: event.payload.candidate }
               : { sdp: event.payload.sdp })
@@ -580,32 +591,36 @@ export function createSyncPlayServer(port = Number(process.env.PORT ?? 8787)) {
       }
 
       relayManager.noteRequestedRange(sessionId, parsedRange.startByte, parsedRange.endByte);
-      const contentLength = parsedRange.endByte - parsedRange.startByte;
       const hasRangeRequest = request.headers.get("range") !== null;
-      const headers = new Headers({
-        "Accept-Ranges": "bytes",
-        "Cache-Control": "no-store",
-        "Content-Length": String(contentLength),
-        "Content-Type": session.mimeType
-      });
+      const requestedLength = parsedRange.endByte - parsedRange.startByte;
+      const buildRangeResponseInit = (servedLength: number): ResponseInit => {
+        const isPartial = hasRangeRequest || servedLength < requestedLength;
+        const headers = new Headers({
+          "Accept-Ranges": "bytes",
+          "Cache-Control": "no-store",
+          "Content-Length": String(servedLength),
+          "Content-Type": session.mimeType
+        });
 
-      if (hasRangeRequest) {
-        headers.set("Content-Range", `bytes ${parsedRange.startByte}-${parsedRange.endByte - 1}/${session.fileSize}`);
-      }
+        if (isPartial) {
+          headers.set(
+            "Content-Range",
+            `bytes ${parsedRange.startByte}-${parsedRange.startByte + servedLength - 1}/${session.fileSize}`
+          );
+        }
+
+        return { status: isPartial ? 206 : 200, headers };
+      };
 
       if (request.method === "HEAD") {
-        return new Response(null, {
-          status: hasRangeRequest ? 206 : 200,
-          headers
-        });
+        return new Response(null, buildRangeResponseInit(requestedLength));
       }
 
       try {
+        // readRange only returns bytes the host has uploaded so far, which can
+        // be fewer than requested.
         const bytes = await relayManager.readRange(sessionId, parsedRange.startByte, parsedRange.endByte);
-        return new Response(bytes, {
-          status: hasRangeRequest ? 206 : 200,
-          headers
-        });
+        return new Response(bytes, buildRangeResponseInit(bytes.byteLength));
       } catch (error) {
         return Response.json(
           { message: error instanceof Error ? error.message : "Requested media file is not available yet." },
