@@ -493,7 +493,23 @@ shared by two 10 Mbps viewers), so seek recovery there is bounded by download ti
 
 ### Runs That Ended Without A Result
 
-Two causes, both fixed:
+Root cause (confirmed): the app's shutdown destroyed the shared WebTorrent client twice.
+`before-quit` started `destroyTorrentSession` for every session without awaiting, then destroyed
+the shared client and set `torrentClient = null`. Each session teardown later resumed, saw
+`session.client !== torrentClient` (now `null`) and destroyed the shared client again, rejecting with
+`client already destroyed`. Inspecting the real app through the Chrome DevTools frontend
+(`--remote-allow-origins`), with a host session and an isolated guest session, a process-group
+`SIGTERM` (how the benchmark harness ended each run) left the pre-fix app alive and idle for 4+
+minutes after that rejection, still holding its CDP port; the next run attached to it and never
+printed a result.
+
+| Check | Before | After |
+| --- | ---: | ---: |
+| Replay of the shutdown logic with real clients (`scripts/bench-torrent/shutdown-replay.mjs`) | 5/5 `client already destroyed` | 0/5 |
+| Real app, 2 sessions, group `SIGTERM` (`reports/torrent-quit-hang.txt`) | 1/10 never quit | 0/10, quits in ~1 s |
+| Minimal Electron quit with active `wss://` trackers | 3/5 `SIGABRT` | 0/5 |
+
+Related fixes and findings:
 
 - **App crash on quit (real bug).** macOS crash report `Electron-2026-10-23-224448.ips`, taken during
   the torrent matrix where runs started ending silently: the main process aborted (`SIGABRT`) inside
@@ -516,3 +532,9 @@ Two causes, both fixed:
   execution context; a pending CDP `Runtime.evaluate` then failed with "Execution context was
   destroyed" and the probe exited without printing a result. `CdpClient.evaluate` now retries after
   a reload; verified by reloading the app window during a 3 s evaluation (it now resolves).
+
+- **Leaked torrent downloads.** Downloads are only deleted on a clean exit, so killed or crashed
+  instances (including every hung run above) left them in `$TMPDIR/syncplay-torrents`: 330 folders,
+  52 GB on the test machine. Downloads now live under a per-process folder and stale folders (dead
+  process or old layout) are removed at startup. Verified: startup cleared the 52 GB, and after a
+  `SIGKILL` the next launch removed the killed instance's folder.

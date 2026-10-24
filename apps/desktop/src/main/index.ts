@@ -22,6 +22,10 @@ const SYNCPLAY_MEDIA_SCHEME = "syncplay-media";
 const STREAM_CHUNK_SIZE = 1024 * 1024;
 const TORRENT_RESOLVE_TIMEOUT_MS = 90_000;
 const TORRENT_DOWNLOAD_ROOT = path.join(os.tmpdir(), "syncplay-torrents");
+// Downloads live under a folder per app process so leftovers from instances
+// that were killed or crashed (never reaching destroyStoreOnDestroy) can be
+// removed at startup without touching another running instance's files.
+const TORRENT_INSTANCE_ROOT = path.join(TORRENT_DOWNLOAD_ROOT, String(process.pid));
 const RENDERER_BUILD_DIR = path.join(__dirname, "../renderer");
 const DEFAULT_TORRENT_TRACKERS = [
   "wss://tracker.openwebtorrent.com",
@@ -385,7 +389,7 @@ async function resolveTorrentMetadata(
   }
 
   const sessionId = crypto.randomUUID();
-  const downloadPath = path.join(TORRENT_DOWNLOAD_ROOT, sessionId);
+  const downloadPath = path.join(TORRENT_INSTANCE_ROOT, sessionId);
   await fs.mkdir(downloadPath, { recursive: true });
   const client = await getTorrentClient({ isolated: options.forceIsolatedTorrentSession });
   const torrent = client.add(magnetUri, {
@@ -1295,7 +1299,35 @@ function startMediaServer() {
   return mediaServerBaseUrlPromise;
 }
 
+function isProcessRunning(pid: number) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+// Removes torrent downloads left by app instances that are no longer running,
+// plus folders from the old per-session layout.
+async function removeStaleTorrentDownloads() {
+  const entries = await fs.readdir(TORRENT_DOWNLOAD_ROOT).catch(() => [] as string[]);
+
+  await Promise.all(
+    entries.map(async (entry) => {
+      const pid = /^\d+$/.test(entry) ? Number(entry) : null;
+
+      if (pid !== null && (pid === process.pid || isProcessRunning(pid))) {
+        return;
+      }
+
+      await fs.rm(path.join(TORRENT_DOWNLOAD_ROOT, entry), { recursive: true, force: true }).catch(() => undefined);
+    })
+  );
+}
+
 app.whenReady().then(() => {
+  void removeStaleTorrentDownloads();
   electronApp.setAppUserModelId("com.syncplay.desktop");
   if (process.platform === "darwin" && app.dock) {
     app.dock.setIcon(nativeImage.createFromPath(resolveMacAppIconPath()));
