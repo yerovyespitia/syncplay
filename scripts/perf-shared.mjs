@@ -68,11 +68,25 @@ export class CdpClient {
   }
 
   async evaluate(expression) {
-    const result = await this.send("Runtime.evaluate", {
-      expression,
-      awaitPromise: true,
-      returnByValue: true
-    })
+    // A renderer reload (e.g. the dev server re-optimizing deps) destroys the
+    // execution context mid-call. That used to kill harnesses without a result;
+    // retry once the new page is up instead.
+    let result
+    for (let attempt = 1; ; attempt++) {
+      try {
+        result = await this.send("Runtime.evaluate", {
+          expression,
+          awaitPromise: true,
+          returnByValue: true
+        })
+        break
+      } catch (error) {
+        if (attempt >= 5 || !/context was destroyed|Cannot find context|Inspected target navigated/i.test(String(error))) {
+          throw error
+        }
+        await delay(500 * attempt)
+      }
+    }
 
     if (result.exceptionDetails) {
       const description =

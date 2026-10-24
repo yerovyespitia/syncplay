@@ -490,3 +490,29 @@ shared by two 10 Mbps viewers), so seek recovery there is bounded by download ti
 
 - The main process now imports runtime helpers from `@syncplay/shared`, so the package is bundled
   into main/preload (`electron.vite.config.ts`) instead of being required as TypeScript at runtime.
+
+### Runs That Ended Without A Result
+
+Two causes, both fixed:
+
+- **App crash on quit (real bug).** macOS crash report `Electron-2026-10-23-224448.ips`, taken during
+  the torrent matrix where runs started ending silently: the main process aborted (`SIGABRT`) inside
+  `node-datachannel` while Node tore down its environment at exit. WebTorrent's `wss://` trackers open
+  WebRTC connections through that library, and `before-quit` started destroying the torrent clients
+  without waiting, so connections were still alive during teardown. On macOS the crashing process
+  lingers while the report is written, still holding its ports, and the next run attached to it.
+  `before-quit` now waits (up to 3 s) for every torrent client to be destroyed before quitting.
+  Minimal Electron repro with the app's tracker list, 12 s after adding a magnet
+  (`reports/torrent-quit-crash-minimal.txt`):
+
+| Quit | SIGABRT |
+| --- | ---: |
+| No destroy | 3/3 |
+| Old app behaviour (destroy without waiting) | 3/5 |
+| New behaviour (await destroy) | 0/5 |
+
+- **Harness: page reloads killed the probe.** A dev-server reload (Vite re-optimizes dependencies
+  when switching between app copies, because the config embeds absolute paths) destroys the page's
+  execution context; a pending CDP `Runtime.evaluate` then failed with "Execution context was
+  destroyed" and the probe exited without printing a result. `CdpClient.evaluate` now retries after
+  a reload; verified by reloading the app window during a 3 s evaluation (it now resolves).

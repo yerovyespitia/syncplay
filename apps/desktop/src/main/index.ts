@@ -1554,15 +1554,38 @@ app.whenReady().then(() => {
   });
 });
 
-app.on("before-quit", () => {
-  for (const sessionId of Array.from(torrentSessions.keys())) {
-    void destroyTorrentSession(sessionId);
+// WebTorrent's wss:// trackers open WebRTC connections through node-datachannel.
+// If those are still alive when Node tears down the environment at exit, their
+// finalizers abort the process (SIGABRT, "quit unexpectedly"). So quitting
+// waits for every torrent client to be destroyed first, bounded by a timeout.
+const TORRENT_SHUTDOWN_TIMEOUT_MS = 3000;
+let torrentShutdownComplete = false;
+
+async function destroyAllTorrentClients() {
+  const clients = new Set(
+    [torrentClient, ...Array.from(torrentSessions.values(), (session) => session.client)].filter(
+      (client): client is WebTorrentNamespace.Instance => client !== null
+    )
+  );
+  torrentSessions.clear();
+  torrentClient = null;
+
+  await Promise.race([
+    Promise.all(Array.from(clients, (client) => new Promise<void>((resolve) => client.destroy(() => resolve())))),
+    new Promise<void>((resolve) => setTimeout(resolve, TORRENT_SHUTDOWN_TIMEOUT_MS))
+  ]);
+}
+
+app.on("before-quit", (event) => {
+  if (torrentShutdownComplete) {
+    return;
   }
 
-  if (torrentClient) {
-    torrentClient.destroy();
-    torrentClient = null;
-  }
+  event.preventDefault();
+  void destroyAllTorrentClients().finally(() => {
+    torrentShutdownComplete = true;
+    app.quit();
+  });
 });
 
 app.on("window-all-closed", () => {

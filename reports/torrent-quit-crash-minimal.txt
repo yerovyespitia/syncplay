@@ -1,0 +1,10 @@
+fire-and-forget run 1 exit=1 signal SIGABRT
+destroy-first run 1 exit=0 
+fire-and-forget run 2 exit=1 signal SIGABRT
+destroy-first run 2 exit=0 
+fire-and-forget run 3 exit=1 signal SIGABRT
+destroy-first run 3 exit=0 
+fire-and-forget run 4 exit=0 
+destroy-first run 4 exit=0 
+fire-and-forget run 5 exit=0 
+destroy-first run 5 exit=0 
