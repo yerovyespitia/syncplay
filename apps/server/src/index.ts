@@ -1,5 +1,5 @@
 import type { ChatMessage, ClientEvent, HostedFileMediaSource, Participant, ServerEnvelope, TransferState } from "@syncplay/shared";
-import { normalizeRoomId } from "@syncplay/shared";
+import { normalizeRoomId, sanitizeTorrentPeerHints } from "@syncplay/shared";
 
 import {
   buildHostJoinMessage,
@@ -185,7 +185,14 @@ export function createSyncPlayServer(port = Number(process.env.PORT ?? 8787), ic
         }
 
         const participant = buildParticipant(ws.data.participantId, event.payload.displayName);
-        const created = roomManager.createRoom(event.payload.mediaSource, participant);
+        const mediaSource =
+          event.payload.mediaSource.type === "torrent_magnet"
+            ? {
+                ...event.payload.mediaSource,
+                peerHints: sanitizeTorrentPeerHints(event.payload.mediaSource.peerHints, ws.data.clientKey)
+              }
+            : event.payload.mediaSource;
+        const created = roomManager.createRoom(mediaSource, participant);
         ws.data.roomId = created.room.roomId;
         addSocketToRoom(created.room.roomId, ws);
         send(ws, {

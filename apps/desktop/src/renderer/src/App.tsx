@@ -458,7 +458,8 @@ export default function App() {
       try {
         await disposeActiveTorrentSession();
         const nextSession = await torrentSessionProvider.resolveMagnetLink(room.mediaSource.magnetUri, {
-          forceIsolatedTorrentSession: shouldForceIsolatedTorrentSessions
+          forceIsolatedTorrentSession: shouldForceIsolatedTorrentSessions,
+          peerHints: room.mediaSource.peerHints
         });
 
         if (isCancelled) {
@@ -683,7 +684,8 @@ export default function App() {
         mediaId: selectedLocalFile.mediaId,
         fileName: selectedLocalFile.fileName,
         fileSize: selectedLocalFile.fileSize,
-        mimeType: selectedLocalFile.mimeType
+        mimeType: selectedLocalFile.mimeType,
+        peerHints: "peerHints" in selectedLocalFile ? selectedLocalFile.peerHints : undefined
       });
       setLocalError(null);
       return;

@@ -1,0 +1,8 @@
+{"variant":"base","hostHadMiB":333,"metadataMs":2927,"firstByteMs":3870,"first4MiBMs":13519,"fromHostMiB":0,"guestPeers":11}
+{"variant":"with-host","hostHadMiB":326,"metadataMs":3591,"firstByteMs":3612,"first4MiBMs":3617,"fromHostMiB":6.7,"guestPeers":3}
+{"variant":"with-host","hostHadMiB":291,"metadataMs":2628,"firstByteMs":2650,"first4MiBMs":2653,"fromHostMiB":5.8,"guestPeers":2}
+{"variant":"base","hostHadMiB":298,"metadataMs":2495,"firstByteMs":3201,"first4MiBMs":14238,"fromHostMiB":0,"guestPeers":5}
+{"variant":"base","hostHadMiB":309,"metadataMs":3735,"firstByteMs":6039,"first4MiBMs":15650,"fromHostMiB":0,"guestPeers":5}
+{"variant":"with-host","hostHadMiB":223,"metadataMs":3970,"firstByteMs":3991,"first4MiBMs":3998,"fromHostMiB":6.3,"guestPeers":3}
+{"variant":"with-host","hostHadMiB":297,"metadataMs":2404,"firstByteMs":2424,"first4MiBMs":2434,"fromHostMiB":5.5,"guestPeers":2}
+{"variant":"base","hostHadMiB":296,"metadataMs":3393,"firstByteMs":8404,"first4MiBMs":15532,"fromHostMiB":0,"guestPeers":5}

@@ -9,6 +9,7 @@ import type { AddressInfo } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { parseTorrentPeerHint } from "@syncplay/shared";
 import type { PickedLocalFile, TorrentMediaFile, TorrentSessionSummary } from "@syncplay/shared";
 import type * as WebTorrentNamespace from "webtorrent";
 
@@ -333,10 +334,53 @@ function mergeTorrentTrackers(magnetUri: string) {
   return Array.from(trackers);
 }
 
-async function resolveTorrentMetadata(magnetUri: string, options: { forceIsolatedTorrentSession?: boolean } = {}) {
+// Dials the room host's torrent client directly: it already has the pieces near
+// the playhead and unchokes right away, while public peers take 10+ s to
+// unchoke a newcomer (scripts/bench-torrent/host-peer-bench.mjs).
+function addTorrentPeerHints(torrent: WebTorrentNamespace.Torrent, peerHints: string[] = []) {
+  const peers = peerHints.map(parseTorrentPeerHint).filter((hint) => hint !== null);
+
+  if (peers.length === 0) {
+    return;
+  }
+
+  const addPeers = () => {
+    for (const peer of peers) {
+      torrent.addPeer(`${peer.host}:${peer.port}`);
+    }
+  };
+
+  // WebTorrent throws if addPeer runs before the magnet's infohash is parsed;
+  // that still happens before metadata, so the host can serve it.
+  if (torrent.infoHash) {
+    addPeers();
+  } else {
+    torrent.once("infoHash", addPeers);
+  }
+}
+
+// LAN addresses where this machine's torrent client accepts peers.
+function getLocalTorrentPeerHints(client: WebTorrentNamespace.Instance) {
+  const port = (client as WebTorrentNamespace.Instance & { torrentPort?: number }).torrentPort;
+
+  if (!port) {
+    return [];
+  }
+
+  return Object.values(os.networkInterfaces())
+    .flat()
+    .filter((address): address is os.NetworkInterfaceInfo => Boolean(address && address.family === "IPv4" && !address.internal))
+    .map((address) => `${address.address}:${port}`);
+}
+
+async function resolveTorrentMetadata(
+  magnetUri: string,
+  options: { forceIsolatedTorrentSession?: boolean; peerHints?: string[] } = {}
+) {
   const reusableSession = options.forceIsolatedTorrentSession ? null : findReusableTorrentSession(magnetUri);
 
   if (reusableSession) {
+    addTorrentPeerHints(reusableSession.torrent, options.peerHints);
     return cloneTorrentSession(magnetUri, reusableSession);
   }
 
@@ -349,6 +393,8 @@ async function resolveTorrentMetadata(magnetUri: string, options: { forceIsolate
     path: downloadPath,
     destroyStoreOnDestroy: true
   });
+  // Before metadata arrives, so the host can also serve the metadata itself.
+  addTorrentPeerHints(torrent, options.peerHints);
   const session: TorrentSession = {
     sessionId,
     mediaId: crypto.randomUUID(),
@@ -1295,13 +1341,14 @@ app.whenReady().then(() => {
 
   ipcMain.handle(
     "syncplay:resolve-magnet-link",
-    async (_, magnetUri: string, options?: { forceIsolatedTorrentSession?: boolean }) => {
+    async (_, magnetUri: string, options?: { forceIsolatedTorrentSession?: boolean; peerHints?: string[] }) => {
       if (typeof magnetUri !== "string" || !magnetUri.trim().startsWith("magnet:?")) {
         throw new Error("Enter a valid magnet link.");
       }
 
       const session = await resolveTorrentMetadata(magnetUri.trim(), {
-        forceIsolatedTorrentSession: Boolean(options?.forceIsolatedTorrentSession)
+        forceIsolatedTorrentSession: Boolean(options?.forceIsolatedTorrentSession),
+        peerHints: Array.isArray(options?.peerHints) ? options.peerHints : undefined
       });
       return buildTorrentSessionSummary(session);
     }
@@ -1355,7 +1402,8 @@ app.whenReady().then(() => {
       streamUrl,
       fileName: selectedFile.name,
       fileSize: selectedFile.length,
-      mimeType: inferMimeType(selectedFile.name)
+      mimeType: inferMimeType(selectedFile.name),
+      peerHints: getLocalTorrentPeerHints(session.client)
     } satisfies PickedLocalFile;
   });
 

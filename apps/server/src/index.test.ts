@@ -198,6 +198,29 @@ describe("syncplay server chat", () => {
     expect(errorEvent.payload.message).toBe("Missing torrent magnet metadata.");
   });
 
+  test("publishes sanitized torrent peer hints with the host's observed address", async () => {
+    const host = await openSocket(server.port, sockets);
+    host.send({
+      type: "create_room",
+      payload: {
+        mediaSource: {
+          type: "torrent_magnet",
+          magnetUri: "magnet:?xt=urn:btih:dd8255ecdc7ca55fb0bbf81323d87062db1f6d1c",
+          infoHash: "dd8255ecdc7ca55fb0bbf81323d87062db1f6d1c",
+          mediaId: "media-torrent-1",
+          fileName: "Big Buck Bunny.mp4",
+          fileSize: 276134947,
+          mimeType: "video/mp4",
+          peerHints: ["192.168.1.20:6881", "8.8.8.8:53"]
+        }
+      }
+    });
+
+    const created = await host.nextEvent("room_created");
+    const mediaSource = created.payload.room.mediaSource;
+    expect(mediaSource.type === "torrent_magnet" ? mediaSource.peerHints : null).toEqual(["127.0.0.1:6881", "192.168.1.20:6881"]);
+  });
+
   test("relays the peer connection lane with WebRTC signals", async () => {
     const host = await openSocket(server.port, sockets);
     const guest = await openSocket(server.port, sockets);

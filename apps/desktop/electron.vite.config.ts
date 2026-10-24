@@ -5,7 +5,9 @@ import { defineConfig, externalizeDepsPlugin } from "electron-vite";
 
 export default defineConfig({
   main: {
-    plugins: [externalizeDepsPlugin()],
+    // @syncplay/shared ships TypeScript source, so it must be bundled rather
+    // than left as a runtime require.
+    plugins: [externalizeDepsPlugin({ exclude: ["@syncplay/shared"] })],
     resolve: {
       alias: {
         "@syncplay/shared": path.resolve(__dirname, "../../packages/shared/src/index.ts")
@@ -13,7 +15,7 @@ export default defineConfig({
     }
   },
   preload: {
-    plugins: [externalizeDepsPlugin()]
+    plugins: [externalizeDepsPlugin({ exclude: ["@syncplay/shared"] })]
   },
   renderer: {
     envDir: __dirname,

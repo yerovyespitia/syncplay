@@ -1,0 +1,12 @@
+{"source":"bbb","version":"hint-before","result":{"hostMetadataMs":1274,"guestMetadataMs":2157,"joinToPlaybackMs":5172,"rebufferingSeconds":0,"seekRecoveryMs":7084,"seekAttempted":true}}
+{"source":"bbb","version":"hint-after","result":{"hostMetadataMs":1529,"guestMetadataMs":1664,"joinToPlaybackMs":3170,"rebufferingSeconds":0,"seekRecoveryMs":1746,"seekAttempted":true}}
+{"source":"bbb","version":"hint-after","result":{"hostMetadataMs":1274,"guestMetadataMs":1473,"joinToPlaybackMs":3482,"rebufferingSeconds":0,"seekRecoveryMs":1728,"seekAttempted":true}}
+{"source":"bbb","version":"hint-before","result":{"hostMetadataMs":1526,"guestMetadataMs":2317,"joinToPlaybackMs":5834,"rebufferingSeconds":0,"seekRecoveryMs":2048,"seekAttempted":true}}
+{"source":"bbb","version":"hint-before","result":{"hostMetadataMs":1276,"guestMetadataMs":2464,"joinToPlaybackMs":6486,"rebufferingSeconds":0,"seekRecoveryMs":7577,"seekAttempted":true}}
+{"source":"bbb","version":"hint-after","result":{"hostMetadataMs":2032,"guestMetadataMs":4047,"joinToPlaybackMs":5055,"rebufferingSeconds":0,"seekRecoveryMs":2026,"seekAttempted":true}}
+{"source":"tos","version":"hint-before","result":{"hostMetadataMs":2030,"guestMetadataMs":2866,"joinToPlaybackMs":7899,"rebufferingSeconds":0,"seekRecoveryMs":null,"seekAttempted":true}}
+{"source":"tos","version":"hint-after","result":{"hostMetadataMs":1786,"guestMetadataMs":995,"joinToPlaybackMs":3006,"rebufferingSeconds":0,"seekRecoveryMs":5036,"seekAttempted":true}}
+{"source":"tos","version":"hint-after","result":{"hostMetadataMs":1284,"guestMetadataMs":791,"joinToPlaybackMs":2799,"rebufferingSeconds":0,"seekRecoveryMs":4028,"seekAttempted":true}}
+{"source":"tos","version":"hint-before","result":{"hostMetadataMs":1792,"guestMetadataMs":2031,"joinToPlaybackMs":21728,"rebufferingSeconds":0,"seekRecoveryMs":23712,"seekAttempted":true}}
+{"source":"tos","version":"hint-before","result":{"hostMetadataMs":1528,"guestMetadataMs":3123,"joinToPlaybackMs":41375,"rebufferingSeconds":0,"seekRecoveryMs":null,"seekAttempted":true}}
+{"source":"tos","version":"hint-after","result":{"hostMetadataMs":1278,"guestMetadataMs":695,"joinToPlaybackMs":2704,"rebufferingSeconds":0,"seekRecoveryMs":5036,"seekAttempted":true}}

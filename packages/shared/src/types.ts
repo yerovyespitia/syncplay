@@ -57,6 +57,8 @@ export interface TorrentMagnetMediaSource extends HostedFileMediaSourceBase {
   type: "torrent_magnet";
   magnetUri: string;
   infoHash: string;
+  /** `ip:port` addresses of the host's torrent client, for guests to connect to directly. */
+  peerHints?: string[];
 }
 
 export type HostedFileMediaSource = LocalFileMediaSource | TorrentMagnetMediaSource;
@@ -393,6 +395,8 @@ export interface TorrentSessionSummary {
 
 export interface ResolveMagnetOptions {
   forceIsolatedTorrentSession?: boolean;
+  /** Extra peers to dial right away (e.g. the room host), see TorrentMagnetMediaSource. */
+  peerHints?: string[];
 }
 
 export interface TempMediaCacheMetadata {

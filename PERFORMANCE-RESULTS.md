@@ -467,3 +467,26 @@ shared by two 10 Mbps viewers), so seek recovery there is bounded by download ti
 - Engine benchmarks: `node scripts/bench-torrent/stream-bench.mjs <magnet> --reader=chunked|stream --utp=on|off`,
   `node scripts/bench-torrent/playback-bench.mjs <magnet> --reader=window4 --bitrate-mbps=6`
 - Real app: `scripts/bench-torrent/run-app-matrix.sh 3 <old-app-dir> <new-app-dir> local=bench.magnet bbb=<file>`
+
+### Guests Connect Straight To The Host (Peer Hints)
+
+- After metadata, a new guest waited ~10–12 s for its first 4 MiB: public peers don't unchoke a
+  newcomer right away. The room host's WebTorrent client already has the pieces near the start and
+  unchokes immediately (`scripts/bench-torrent/host-peer-bench.mjs`, public Tears of Steel, LSD off,
+  4 runs each): first 4 MiB in 13.5 / 14.2 / 15.7 / 15.5 s alone vs 3.6 / 2.7 / 4.0 / 2.4 s with the
+  host as a peer.
+- The host now publishes its torrent client's `ip:port` (LAN addresses plus the public IP the server
+  observes, validated in `packages/shared/src/torrent.ts`) as `peerHints` in the room; guests dial
+  them as soon as the magnet's infohash is known, before metadata.
+- Real app, public swarms, LSD disabled in both versions so host and guest act like separate
+  networks, 3 alternating runs each:
+
+| Swarm | Version | Join → playback | Seek time |
+| --- | --- | --- | --- |
+| BBB | Before | 5.2 / 5.8 / 6.5 s | 7.1 / 2.0 / 7.6 s |
+| BBB | After | 3.2 / 3.5 / 5.1 s | 1.7 / 1.7 / 2.0 s |
+| Tears of Steel | Before | 7.9 / 21.7 / 41.4 s | failed / 23.7 s / failed |
+| Tears of Steel | After | 3.0 / 2.8 / 2.7 s | 5.0 / 4.0 / 5.0 s |
+
+- The main process now imports runtime helpers from `@syncplay/shared`, so the package is bundled
+  into main/preload (`electron.vite.config.ts`) instead of being required as TypeScript at runtime.
