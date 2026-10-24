@@ -46,7 +46,15 @@ async function waitFor(label, check, timeoutMs = 120_000) {
 // Electron can outlive electron-vite's process group, so anything still
 // listening on our ports is killed too; otherwise the next run would attach to
 // a stale app over CDP.
+// E2E_LEGACY_STOP=1 reproduces the original harness: only SIGTERM the process
+// groups, without killing whatever still listens on the ports afterwards.
+const LEGACY_STOP = process.env.E2E_LEGACY_STOP === "1";
+
 function killPortListeners() {
+  if (LEGACY_STOP) {
+    return;
+  }
+
   const ports = [SERVER_PORT, PROXY_PORT, CDP_PORT, 5173].map((port) => `-iTCP:${port}`);
   const result = spawnSync("lsof", ["-t", "-sTCP:LISTEN", ...ports], { encoding: "utf8" });
   for (const pid of new Set(result.stdout.split("\n").filter(Boolean).map(Number))) {
