@@ -82,6 +82,13 @@ const recordVideoEvents = `(() => {
 await host.evaluate(recordVideoEvents);
 await guest.evaluate(recordVideoEvents);
 
+// PROBE_PLAY_BEFORE_JOIN=1: the host starts playing alone and the guest joins a
+// few seconds later (a friend joining a movie that already started).
+if (process.env.PROBE_PLAY_BEFORE_JOIN === "1") {
+  await host.evaluate("document.querySelector('video')?.play()").catch(() => undefined);
+  await sleep(3000);
+}
+
 // --- Guest joins; the host presses play right away ----------------------------
 await guest.evaluate(`window.__syncplayTest.joinRoomByCode(${jsString(hostState.room.roomId)})`);
 const joinedAt = Date.now();
@@ -114,7 +121,14 @@ while (Date.now() - joinedAt < TIMEOUT_MS) {
   const inSeekPhase = seekIssuedAt !== null;
   // Like a user: when the "waiting for guest" overlay has cleared (guest ready)
   // but the room is paused, the host presses play again. Applies to both versions.
-  if (!inSeekPhase && app?.room?.playbackState === "paused" && app.room.transferState?.isPlaybackReady && now - lastPlayPressAt > 2000) {
+  // PROBE_PLAY_ONCE=1 disables this to reproduce the "play pressed too early" race.
+  if (
+    process.env.PROBE_PLAY_ONCE !== "1" &&
+    !inSeekPhase &&
+    app?.room?.playbackState === "paused" &&
+    app.room.transferState?.isPlaybackReady &&
+    now - lastPlayPressAt > 2000
+  ) {
     lastPlayPressAt = now;
     await host.evaluate("document.querySelector('video')?.play()").catch(() => undefined);
   }

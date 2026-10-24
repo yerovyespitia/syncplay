@@ -484,6 +484,7 @@ export function LocalFileRoomPlayer({
   const directTorrentBaselineBytesRef = useRef<number | null>(null);
   const remoteParticipantIdRef = useRef<string | null>(null);
   const directTorrentPlaybackReadyRef = useRef(false);
+  const resumeAfterLoadingOverlayRef = useRef(false);
   const skipNextLocalPlayEventRef = useRef(false);
   const forwardNextLocalPauseEventRef = useRef(false);
   const suppressNextLocalPauseEventRef = useRef(false);
@@ -793,8 +794,16 @@ export function LocalFileRoomPlayer({
   }, [isHost, room.mediaSource.fileName, room.mediaSource.fileSize, room.mediaSource.mediaId, room.mediaSource.mimeType]);
 
   useEffect(() => {
+    const video = videoRef.current;
+
     if (showLoadingOverlay) {
-      const video = videoRef.current;
+      // The overlay holds everyone at the start while a participant loads. If
+      // the host had already asked to play (e.g. pressed play just before the
+      // guest reported it was still loading), remember it so playback resumes
+      // once everyone is ready instead of leaving the room paused.
+      if (isHost && (room.playbackState === "playing" || (video && !video.paused))) {
+        resumeAfterLoadingOverlayRef.current = true;
+      }
       if (video) {
         video.pause();
         if (video.currentTime > 0) {
@@ -803,6 +812,16 @@ export function LocalFileRoomPlayer({
       }
       setIsPlaying(false);
       setCurrentTime(0);
+      return;
+    }
+
+    if (!resumeAfterLoadingOverlayRef.current) {
+      return;
+    }
+
+    resumeAfterLoadingOverlayRef.current = false;
+    if (isHost && video && mediaUrl && video.paused) {
+      requestLocalPlayback(video);
     }
   }, [showLoadingOverlay]);
 

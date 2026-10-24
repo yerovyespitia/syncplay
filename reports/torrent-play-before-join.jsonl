@@ -1,0 +1,6 @@
+{"version":"bug-before","result":{"hostMetadataMs":1022,"guestMetadataMs":502,"joinToPlaybackMs":2510,"rebufferingSeconds":0,"seekRecoveryMs":null,"seekAttempted":true}}
+{"version":"bug-after","result":{"hostMetadataMs":1272,"guestMetadataMs":1354,"joinToPlaybackMs":3364,"rebufferingSeconds":0,"seekRecoveryMs":null,"seekAttempted":true}}
+{"version":"bug-after","result":{"hostMetadataMs":1779,"guestMetadataMs":503,"joinToPlaybackMs":2010,"rebufferingSeconds":0,"seekRecoveryMs":null,"seekAttempted":true}}
+{"version":"bug-before","result":{"hostMetadataMs":1524,"guestMetadataMs":503,"joinToPlaybackMs":2010,"rebufferingSeconds":0,"seekRecoveryMs":null,"seekAttempted":true}}
+{"version":"bug-before","result":{"hostMetadataMs":1273,"guestMetadataMs":503,"joinToPlaybackMs":2006,"rebufferingSeconds":0,"seekRecoveryMs":null,"seekAttempted":true}}
+{"version":"bug-after","result":{"hostMetadataMs":1524,"guestMetadataMs":736,"joinToPlaybackMs":2745,"rebufferingSeconds":0,"seekRecoveryMs":null,"seekAttempted":true}}

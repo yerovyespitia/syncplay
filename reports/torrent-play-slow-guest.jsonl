@@ -1,0 +1,12 @@
+{"version":"bug-before","result":{"hostMetadataMs":265,"guestMetadataMs":502,"joinToPlaybackMs":null,"rebufferingSeconds":null,"seekRecoveryMs":null,"seekAttempted":false}}
+{"version":"bug-after","result":{"hostMetadataMs":266,"guestMetadataMs":504,"joinToPlaybackMs":15087,"rebufferingSeconds":5.03,"seekRecoveryMs":null,"seekAttempted":true}}
+{"version":"bug-after","result":{"hostMetadataMs":265,"guestMetadataMs":502,"joinToPlaybackMs":42746,"rebufferingSeconds":5.031,"seekRecoveryMs":null,"seekAttempted":true}}
+{"version":"bug-before","result":{"hostMetadataMs":264,"guestMetadataMs":503,"joinToPlaybackMs":136344,"rebufferingSeconds":5.033,"seekRecoveryMs":null,"seekAttempted":true}}
+{"version":"bug-before","result":{"hostMetadataMs":278,"guestMetadataMs":503,"joinToPlaybackMs":46846,"rebufferingSeconds":5.036,"seekRecoveryMs":null,"seekAttempted":true}}
+{"version":"bug-after","result":{"hostMetadataMs":264,"guestMetadataMs":503,"joinToPlaybackMs":21141,"rebufferingSeconds":5.044,"seekRecoveryMs":null,"seekAttempted":true}}
+{"version":"bug-after","result":{"hostMetadataMs":264,"guestMetadataMs":503,"joinToPlaybackMs":32197,"rebufferingSeconds":5.028,"seekRecoveryMs":null,"seekAttempted":true}}
+{"version":"bug-before","result":{"hostMetadataMs":265,"guestMetadataMs":503,"joinToPlaybackMs":32680,"rebufferingSeconds":5.028,"seekRecoveryMs":null,"seekAttempted":true}}
+{"version":"bug-before","result":{"hostMetadataMs":265,"guestMetadataMs":503,"joinToPlaybackMs":24638,"rebufferingSeconds":4.524,"seekRecoveryMs":null,"seekAttempted":true}}
+{"version":"bug-after","result":{"hostMetadataMs":265,"guestMetadataMs":503,"joinToPlaybackMs":23633,"rebufferingSeconds":5.03,"seekRecoveryMs":null,"seekAttempted":true}}
+{"version":"bug-after","result":{"hostMetadataMs":265,"guestMetadataMs":503,"joinToPlaybackMs":38774,"rebufferingSeconds":5.041,"seekRecoveryMs":null,"seekAttempted":true}}
+{"version":"bug-before","result":{"hostMetadataMs":264,"guestMetadataMs":503,"joinToPlaybackMs":62884,"rebufferingSeconds":5.032,"seekRecoveryMs":null,"seekAttempted":true}}

@@ -447,11 +447,19 @@ Rebuffering was 0 s in all 18 runs. Public swarms vary run to run; the Tears of 
 median for New includes one 10.4 s outlier. The local swarm is deliberately tight (~3 MiB/s total
 shared by two 10 Mbps viewers), so seek recovery there is bounded by download time.
 
-### Known Issue (pre-existing, not addressed)
+### Fixed Afterwards: Room Stuck Paused After "Waiting For Guest"
 
-- If the host presses play before the guest is ready, the "waiting for guest" overlay pauses the
-  room and rewinds to 0, and nothing resumes it once the guest is ready; the host has to press play
-  again. The probe presses play again like a user would, for both versions.
+- If playback was requested before a slow guest was ready (host pressed play, or a guest joined a
+  movie already playing), the loading overlay paused the room and rewound to 0, and nothing resumed
+  it once the guest was ready. The host now remembers the request and resumes when the overlay
+  clears.
+- Reproduced with a slow local swarm (seeders capped at 150 + 100 KiB/s), host playing before the
+  guest joins, play pressed only once (`PROBE_PLAY_BEFORE_JOIN=1 PROBE_PLAY_ONCE=1`), 6 runs each:
+
+| Version | Started within 150 s | Join → playback (median of started) | Worst |
+| --- | ---: | ---: | ---: |
+| Before | 5/6 | `46.8 s` | never |
+| After | 6/6 | `23.6 s` | `42.7 s` |
 
 ### Reproduce
 
