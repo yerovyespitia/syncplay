@@ -3,6 +3,8 @@ import { electronApp, optimizer } from "@electron-toolkit/utils";
 import { promises as fs } from "node:fs";
 import type { FileHandle } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import type { AddressInfo } from "node:net";
 import os from "node:os";
 import path from "node:path";
@@ -65,6 +67,8 @@ interface LocalMediaHandle {
   mimeType: string;
   fileUrl: string;
   readRange: (startByte: number, endByte: number) => Promise<Uint8Array>;
+  /** Streams [startByte, endByte) continuously; used for torrents, see streamStaticMediaBytes. */
+  createReadStream?: (startByte: number, endByte: number) => Readable;
 }
 
 interface MediaCacheSession {
@@ -207,6 +211,25 @@ async function readTorrentFileRange(file: WebTorrentNamespace.TorrentFile, start
   });
 }
 
+// WebTorrent gives every piece of a stream's range the same priority, so one
+// stream for `bytes=N-` spreads downloads over the rest of the file and starves
+// the pieces right after the playhead (rebuffering); a new stream per 1 MiB is
+// strictly sequential but stalls between chunks. Chaining moderate windows
+// keeps priority near the playhead while reading continuously
+// (scripts/bench-torrent/playback-bench.mjs).
+const TORRENT_STREAM_WINDOW_BYTES = 4 * 1024 * 1024;
+
+function createTorrentRangeStream(file: WebTorrentNamespace.TorrentFile, startByte: number, endByte: number) {
+  async function* windows() {
+    for (let offset = startByte; offset < endByte; offset += TORRENT_STREAM_WINDOW_BYTES) {
+      const windowEnd = Math.min(endByte, offset + TORRENT_STREAM_WINDOW_BYTES);
+      yield* file.createReadStream({ start: offset, end: windowEnd - 1 }) as unknown as AsyncIterable<Uint8Array>;
+    }
+  }
+
+  return Readable.from(windows(), { objectMode: false });
+}
+
 async function loadWebTorrentModule(): Promise<any> {
   if (!webTorrentModulePromise) {
     webTorrentModulePromise = import("webtorrent");
@@ -219,7 +242,10 @@ async function createTorrentClient() {
   try {
     const webTorrentModule = await loadWebTorrentModule();
     const WebTorrentCtor = (webTorrentModule?.default ?? webTorrentModule) as WebTorrentNamespace.WebTorrent;
-    return new WebTorrentCtor();
+    // Connect over TCP. With uTP enabled WebTorrent dials every peer over uTP
+    // first and only falls back to TCP after three 5 s timeouts plus backoff
+    // (~41 s), so peers that only accept TCP stalled metadata and startup.
+    return new WebTorrentCtor({ utp: false });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(`Torrent playback is unavailable on this machine: ${message}`);
@@ -595,6 +621,21 @@ async function streamStaticMediaBytes(
   startByte: number,
   endByte: number
 ) {
+  // Streaming continuously instead of awaiting 1 MiB reads one by one made torrent
+  // seeks ~4x faster (scripts/bench-torrent/stream-bench.mjs). Closing the
+  // response (e.g. the player abandoning a range after a seek) destroys the
+  // stream so those pieces stop competing with the new position.
+  if (handle.createReadStream && endByte > startByte) {
+    try {
+      await pipeline(handle.createReadStream(startByte, endByte), response, { end: false });
+    } catch (error) {
+      if (!response.destroyed) {
+        throw error;
+      }
+    }
+    return;
+  }
+
   let offset = startByte;
 
   while (offset < endByte) {
@@ -1300,7 +1341,8 @@ app.whenReady().then(() => {
       fileSize: selectedFile.length,
       mimeType: inferMimeType(selectedFile.name),
       fileUrl: streamUrl,
-      readRange: (startByte: number, endByte: number) => readTorrentFileRange(selectedFile, startByte, endByte)
+      readRange: (startByte: number, endByte: number) => readTorrentFileRange(selectedFile, startByte, endByte),
+      createReadStream: (startByte: number, endByte: number) => createTorrentRangeStream(selectedFile, startByte, endByte)
     });
 
     return {

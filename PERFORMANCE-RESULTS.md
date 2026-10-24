@@ -400,3 +400,62 @@ with New (~107 s vs ~176 s+).
 - Real app: `scripts/bench-transfer/run-app-matrix.sh <file> 3 <old-app-dir> <new-app-dir>`
   (both dirs need `LOCAL_FILE_SOURCE_ENABLED = true`)
 - Signal loss: `bun scripts/bench-signal-loss/run.ts 30 5`
+
+## 2026-10-24 Torrent (Magnet) Streaming
+
+### Setup
+
+- Real app (`electron-vite dev`), host + guest windows, fresh app per iteration, 3 iterations per
+  version, alternating order. The guest uses an isolated WebTorrent client so it really downloads.
+- "Old" = the code before these torrent changes; "New" = this change. Each version uses its own server.
+- Swarms:
+  - `local`: `scripts/bench-torrent/swarm.mjs`, 1080p H.264 test video (generated, ~10 Mbps),
+    3 seeders capped at 1.5 / 1.0 / 0.5 MiB/s behind a local HTTP tracker.
+  - `bbb`, `tos`: real public swarms for Big Buck Bunny and Tears of Steel (Blender, CC BY),
+    plain magnets (infohash + trackers, no web seed).
+- Viewer metrics from `scripts/bench-torrent/probe-torrent.mjs`: playback only counts with
+  `readyState >= 3` and the position advancing; the seek is a timeline seek to 60% by the host and
+  counts as recovered when host and guest both play past the target.
+
+### What Was Wrong (measured)
+
+- WebTorrent dials every peer over uTP first and only falls back to TCP after three 5 s timeouts plus
+  backoff: peers that only accept TCP took ~41 s to connect. TCP-first on the public BBB swarm
+  (6 runs each): metadata 1.58 → 1.32 s, startup 4.14 → 2.79 s, download 6.0 → 15.5 MiB/s.
+- The media server re-opened a WebTorrent stream per 1 MiB and awaited each one: seek to 60% on the
+  public Tears of Steel swarm took 5.3 s (median of 4) vs 1.3 s with continuous reading.
+- A single stream for `bytes=N-` gives the whole rest of the file the same priority and starved the
+  playhead (16–29 s of rebuffering on Tears of Steel); chained 4 MiB windows fixed it.
+- Torrent guests never followed a seek (`canSeekThroughCurrentMediaSource` was false for them).
+- After a seek the guest republished "not ready", which raised the loading overlay; its effect pauses
+  everyone and rewinds to 0.
+- While waiting for pieces after a seek, the 1.5 s drift loop kept re-seeking host and guest to the
+  advancing room time, discarding the pieces they were waiting for.
+
+### Real App Results
+
+| Swarm | Version | Host metadata (median) | Join → playback | Seek recovered | Seek time |
+| --- | --- | ---: | --- | ---: | --- |
+| local | Old | `41.9 s` | 3.0 / 2.7 / 3.4 s | 0/3 | — |
+| local | New | `0.27 s` | 2.5 / 2.9 / 2.8 s | 3/3 | 8.6 / 6.1 / 9.1 s |
+| BBB (public) | Old | `1.78 s` | 5.0 / 6.3 / 4.8 s | 3/3 | 2.0 / 2.0 / 2.0 s |
+| BBB (public) | New | `1.28 s` | 2.9 / 3.4 / 3.5 s | 3/3 | 2.0 / 2.0 / 2.0 s |
+| Tears of Steel (public) | Old | `1.52 s` | 6.9 / 52.1 / 6.6 s | 3/3 | 15.1 / 2.0 / 22.7 s |
+| Tears of Steel (public) | New | `1.78 s` | 3.0 / 2.9 / 3.6 s | 3/3 | 2.0 / 2.0 / 2.0 s |
+
+Rebuffering was 0 s in all 18 runs. Public swarms vary run to run; the Tears of Steel metadata
+median for New includes one 10.4 s outlier. The local swarm is deliberately tight (~3 MiB/s total
+shared by two 10 Mbps viewers), so seek recovery there is bounded by download time.
+
+### Known Issue (pre-existing, not addressed)
+
+- If the host presses play before the guest is ready, the "waiting for guest" overlay pauses the
+  room and rewinds to 0, and nothing resumes it once the guest is ready; the host has to press play
+  again. The probe presses play again like a user would, for both versions.
+
+### Reproduce
+
+- Local swarm: `node scripts/bench-torrent/swarm.mjs <video> --magnet-out=bench.magnet`
+- Engine benchmarks: `node scripts/bench-torrent/stream-bench.mjs <magnet> --reader=chunked|stream --utp=on|off`,
+  `node scripts/bench-torrent/playback-bench.mjs <magnet> --reader=window4 --bitrate-mbps=6`
+- Real app: `scripts/bench-torrent/run-app-matrix.sh 3 <old-app-dir> <new-app-dir> local=bench.magnet bbb=<file>`

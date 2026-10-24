@@ -483,6 +483,7 @@ export function LocalFileRoomPlayer({
   const lastReportedTransferRef = useRef<TransferState | null>(null);
   const directTorrentBaselineBytesRef = useRef<number | null>(null);
   const remoteParticipantIdRef = useRef<string | null>(null);
+  const directTorrentPlaybackReadyRef = useRef(false);
   const skipNextLocalPlayEventRef = useRef(false);
   const forwardNextLocalPauseEventRef = useRef(false);
   const suppressNextLocalPauseEventRef = useRef(false);
@@ -1071,6 +1072,10 @@ export function LocalFileRoomPlayer({
   }, [canUseLocalTorrentPlayback, isHost, isRelayTransportActive, localFile, remoteParticipantId]);
 
   useEffect(() => {
+    directTorrentPlaybackReadyRef.current = false;
+  }, [mediaUrl, room.mediaSource.mediaId]);
+
+  useEffect(() => {
     if (!canUseLocalTorrentPlayback || isHost || !mediaUrl) {
       return;
     }
@@ -1081,8 +1086,14 @@ export function LocalFileRoomPlayer({
     contiguousBytesRef.current = relativeDownloadedBytes;
 
     const video = videoRef.current;
-    const isPlaybackReady = Boolean(video && video.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA);
-    const phase = isPlaybackReady ? (room.playbackState === "playing" ? "streaming" : "ready") : "buffering";
+    const canPlayNow = Boolean(video && video.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA);
+    // Readiness is about the initial load. Once reached, a rebuffer (e.g. after
+    // a seek into pieces not downloaded yet) must not flip the room back to
+    // "not ready": that raises the loading overlay, which pauses everyone and
+    // rewinds to 0.
+    directTorrentPlaybackReadyRef.current ||= canPlayNow;
+    const isPlaybackReady = directTorrentPlaybackReadyRef.current;
+    const phase = canPlayNow ? (room.playbackState === "playing" ? "streaming" : "ready") : "buffering";
 
     publishTransferState(
       buildTransferState(phase, {
@@ -1090,7 +1101,7 @@ export function LocalFileRoomPlayer({
         bytesPersisted: relativeDownloadedBytes,
         availableRanges,
         isPlaybackReady,
-        message: isPlaybackReady ? "Ready to play" : "Preparing playback"
+        message: canPlayNow ? "Ready to play" : isPlaybackReady ? "Buffering" : "Preparing playback"
       })
     );
   }, [canUseLocalTorrentPlayback, isHost, mediaUrl, room.playbackState, torrentDownloadProgress]);
@@ -1108,7 +1119,7 @@ export function LocalFileRoomPlayer({
 
     const video = videoRef.current;
 
-    if (!video || shouldDeferAuthoritativePlayback(video, room)) {
+    if (!video || shouldDeferAuthoritativePlayback(video, room) || isWaitingForTorrentData(video)) {
       return;
     }
 
@@ -1356,7 +1367,7 @@ export function LocalFileRoomPlayer({
         return;
       }
 
-      if (shouldDeferAuthoritativePlayback(video, room)) {
+      if (shouldDeferAuthoritativePlayback(video, room) || isWaitingForTorrentData(video)) {
         return;
       }
 
@@ -2175,7 +2186,9 @@ export function LocalFileRoomPlayer({
   }
 
   function canSeekThroughCurrentMediaSource() {
-    if (isHost) {
+    // Torrent playback streams any byte range on demand, so the guest can jump
+    // with the room instead of waiting for a progressive download to catch up.
+    if (isHost || canUseLocalTorrentPlayback) {
       return true;
     }
 
@@ -4393,6 +4406,16 @@ export function LocalFileRoomPlayer({
     void video.play().catch(() => {
       skipNextLocalPlayEventRef.current = false;
     });
+  }
+
+  // A torrent element that is playing but still fetching pieces for its
+  // position (e.g. right after a seek) falls behind the room clock every second.
+  // Re-seeking it to the advancing room time discards the pieces it was waiting
+  // for and starts over, so drift is corrected only once it can play again.
+  // Paused elements are excluded: catching up is what calls play() on them, and
+  // a paused element never buffers enough to get there on its own.
+  function isWaitingForTorrentData(video: HTMLVideoElement) {
+    return canUseLocalTorrentPlayback && !video.paused && video.readyState < HTMLMediaElement.HAVE_FUTURE_DATA;
   }
 
   function shouldDeferAuthoritativePlayback(video: HTMLVideoElement, authoritativeRoom: RoomState) {
