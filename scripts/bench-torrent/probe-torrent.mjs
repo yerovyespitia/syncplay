@@ -25,7 +25,11 @@ const PLAYBACK_WINDOW_MS = Number(process.env.PROBE_PLAYBACK_WINDOW_MS ?? 45_000
 const SEEK_FRACTION = 0.6;
 const QUIET = process.env.PROBE_QUIET === "1";
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const phaseStart = Date.now();
+// Marks progress so a run that never prints RESULT shows where it stopped.
+const phase = (name) => console.log(`PHASE ${name} +${((Date.now() - phaseStart) / 1000).toFixed(1)}s`);
 
+phase("waiting-for-app");
 const [hostTarget] = await waitForTargets(Number(cdpPort), 1);
 const host = await connectToTarget(hostTarget);
 await waitForTestHook(host, "host test hook");
@@ -34,6 +38,30 @@ const targets = await waitForTargets(Number(cdpPort), 2);
 const guest = await connectToTarget(targets.find((target) => target.id !== hostTarget.id));
 await waitForTestHook(guest, "guest test hook");
 await guest.evaluate("window.__syncplayTest.setForceIsolatedTorrentSessions?.(true)");
+phase("windows-ready");
+
+// PROBE_CONSOLE=1: stream both windows' console, exceptions and crashes, to
+// diagnose runs that end without a result.
+if (process.env.PROBE_CONSOLE === "1") {
+  const probeStart = Date.now();
+  for (const [label, client] of [["host", host], ["guest", guest]]) {
+    const stamp = () => `+${((Date.now() - probeStart) / 1000).toFixed(1)}s`;
+    client.on("Runtime.consoleAPICalled", ({ type, args }) => {
+      const text = args.map((arg) => arg.value ?? arg.description ?? arg.type).join(" ");
+      console.log(`CONSOLE ${label} ${stamp()} ${type} ${text.slice(0, 400)}`);
+    });
+    client.on("Runtime.exceptionThrown", ({ exceptionDetails }) => {
+      console.log(`EXCEPTION ${label} ${stamp()} ${exceptionDetails.exception?.description ?? exceptionDetails.text}`.slice(0, 600));
+    });
+    client.on("Inspector.targetCrashed", () => console.log(`CRASH ${label} ${stamp()} renderer crashed`));
+    client.on("Inspector.detached", ({ reason }) => console.log(`DETACHED ${label} ${stamp()} ${reason}`));
+    await client.send("Inspector.enable").catch(() => undefined);
+  }
+}
+process.on("unhandledRejection", (error) => {
+  console.log(`PROBE_ERROR ${error?.stack ?? error}`);
+  process.exit(1);
+});
 
 // --- Host: resolve magnet, pick the video, create the room --------------------
 const hostStart = Date.now();
@@ -49,6 +77,7 @@ await host.evaluate(`(() => {
 })()`);
 const resolved = await waitForValue("host magnet metadata", () => getAppState(host), (state) => Boolean(state?.torrentSession?.files?.length), TIMEOUT_MS);
 const hostMetadataMs = Date.now() - hostStart;
+phase("host-metadata");
 const videoFile = resolved.torrentSession.files.reduce((largest, file) => (file.size > largest.size ? file : largest));
 // Single-video torrents are auto-selected; otherwise pick the largest video.
 if (resolved.torrentSession.files.length > 1) {
@@ -62,6 +91,7 @@ if (resolved.torrentSession.files.length > 1) {
 await waitForValue("host file selected", () => getAppState(host), (state) => state?.selectedLocalFile?.type === "torrent_magnet" && Boolean(state?.selectedLocalFile?.mediaId), TIMEOUT_MS);
 await host.evaluate("window.__syncplayTest.createCurrentRoom()");
 const hostState = await waitForValue("room", () => getAppState(host), (state) => Boolean(state?.room?.roomId), TIMEOUT_MS);
+phase("room-created");
 
 // Records media element events so a seek failure can be attributed to a side.
 const recordVideoEvents = `(() => {
@@ -92,6 +122,7 @@ if (process.env.PROBE_PLAY_BEFORE_JOIN === "1") {
 // --- Guest joins; the host presses play right away ----------------------------
 await guest.evaluate(`window.__syncplayTest.joinRoomByCode(${jsString(hostState.room.roomId)})`);
 const joinedAt = Date.now();
+phase("guest-joined");
 await sleep(500);
 await host.evaluate("document.querySelector('video')?.play()").catch(() => undefined);
 

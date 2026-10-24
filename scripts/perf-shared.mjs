@@ -9,6 +9,7 @@ export class CdpClient {
     this.ws = new WebSocket(wsUrl)
     this.nextId = 0
     this.pending = new Map()
+    this.listeners = new Map()
     this.ready = new Promise((resolve, reject) => {
       this.ws.addEventListener("open", resolve, { once: true })
       this.ws.addEventListener("error", reject, { once: true })
@@ -18,6 +19,9 @@ export class CdpClient {
       const message = JSON.parse(String(event.data))
 
       if (!("id" in message)) {
+        for (const listener of this.listeners.get(message.method) ?? []) {
+          listener(message.params)
+        }
         return
       }
 
@@ -44,6 +48,11 @@ export class CdpClient {
 
       this.pending.clear()
     })
+  }
+
+  // Subscribes to a CDP event (e.g. "Runtime.consoleAPICalled").
+  on(method, listener) {
+    this.listeners.set(method, [...(this.listeners.get(method) ?? []), listener])
   }
 
   async send(method, params = {}) {
