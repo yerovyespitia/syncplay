@@ -1,0 +1,8 @@
+{"reader":"chunked","startupMs":2580,"stalledS":0,"seekMs":2,"stalledAfterSeekS":0,"peers":10}
+{"reader":"stream","startupMs":2352,"stalledS":0,"seekMs":14,"stalledAfterSeekS":0,"peers":7}
+{"reader":"window4","startupMs":2241,"stalledS":0,"seekMs":13,"stalledAfterSeekS":0,"peers":8}
+{"reader":"window8","startupMs":2148,"stalledS":0,"seekMs":11,"stalledAfterSeekS":0,"peers":8}
+{"reader":"window8","startupMs":2219,"stalledS":0,"seekMs":16,"stalledAfterSeekS":0,"peers":6}
+{"reader":"window4","startupMs":2575,"stalledS":0,"seekMs":1,"stalledAfterSeekS":0,"peers":7}
+{"reader":"stream","startupMs":2285,"stalledS":0,"seekMs":14,"stalledAfterSeekS":0,"peers":6}
+{"reader":"chunked","startupMs":2815,"stalledS":0,"seekMs":16,"stalledAfterSeekS":0,"peers":10}

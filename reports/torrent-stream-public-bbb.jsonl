@@ -1,0 +1,12 @@
+{"reader":"chunked","utp":true,"metadataMs":1284,"startupMs":3337,"sustainedMiBps":8.84,"seekMs":4,"peers":44}
+{"reader":"stream","utp":false,"metadataMs":1324,"startupMs":3923,"sustainedMiBps":16.16,"seekMs":2,"peers":45}
+{"reader":"stream","utp":true,"metadataMs":1521,"startupMs":6336,"sustainedMiBps":7.34,"seekMs":784,"peers":20}
+{"reader":"chunked","utp":false,"metadataMs":972,"startupMs":2807,"sustainedMiBps":15.01,"seekMs":2,"peers":62}
+{"reader":"chunked","utp":true,"metadataMs":1581,"startupMs":4412,"sustainedMiBps":10.94,"seekMs":9,"peers":26}
+{"reader":"stream","utp":false,"metadataMs":898,"startupMs":2214,"sustainedMiBps":15.53,"seekMs":1,"peers":66}
+{"reader":"stream","utp":true,"metadataMs":2097,"startupMs":3866,"sustainedMiBps":5.96,"seekMs":541,"peers":35}
+{"reader":"chunked","utp":false,"metadataMs":1432,"startupMs":2789,"sustainedMiBps":14.01,"seekMs":5,"peers":54}
+{"reader":"chunked","utp":true,"metadataMs":2009,"startupMs":4470,"sustainedMiBps":4.39,"seekMs":11,"peers":51}
+{"reader":"stream","utp":false,"metadataMs":1370,"startupMs":2782,"sustainedMiBps":17.93,"seekMs":6,"peers":51}
+{"reader":"stream","utp":true,"metadataMs":2083,"startupMs":4143,"sustainedMiBps":5.95,"seekMs":8,"peers":41}
+{"reader":"chunked","utp":false,"metadataMs":1348,"startupMs":3542,"sustainedMiBps":16.21,"seekMs":3,"peers":55}

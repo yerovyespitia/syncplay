@@ -1,0 +1,8 @@
+{"reader":"chunked","utp":false,"metadataMs":1037,"startupMs":2003,"sustainedMiBps":10.7,"seekMs":4679,"peers":19}
+{"reader":"stream","utp":false,"metadataMs":1204,"startupMs":3461,"sustainedMiBps":10.11,"seekMs":1131,"peers":19}
+{"reader":"stream","utp":false,"metadataMs":1127,"startupMs":2525,"sustainedMiBps":9.32,"seekMs":1465,"peers":18}
+{"reader":"chunked","utp":false,"metadataMs":1150,"startupMs":2370,"sustainedMiBps":8.53,"seekMs":6728,"peers":21}
+{"reader":"chunked","utp":false,"metadataMs":1016,"startupMs":2519,"sustainedMiBps":10.36,"seekMs":3418,"peers":21}
+{"reader":"stream","utp":false,"metadataMs":998,"startupMs":2292,"sustainedMiBps":7.64,"seekMs":1117,"peers":18}
+{"reader":"stream","utp":false,"metadataMs":1246,"startupMs":2866,"sustainedMiBps":10.46,"seekMs":1844,"peers":19}
+{"reader":"chunked","utp":false,"metadataMs":1297,"startupMs":2836,"sustainedMiBps":7.14,"seekMs":6007,"peers":18}

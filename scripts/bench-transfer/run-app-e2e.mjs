@@ -4,7 +4,7 @@
 //
 // Usage: node scripts/bench-transfer/run-app-e2e.mjs <app-dir> <media-file> <iterations> <report.json> [netem flags...]
 //   e.g. ... /tmp/syncplay-bench/new bench.mp4 3 reports/e2e-new.json --rate-mbps=30 --rtt-ms=80 --queue-ms=80
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -43,6 +43,23 @@ async function waitFor(label, check, timeoutMs = 120_000) {
   throw new Error(`Timed out waiting for ${label}`);
 }
 
+// Electron can outlive electron-vite's process group, so anything still
+// listening on our ports is killed too; otherwise the next run would attach to
+// a stale app over CDP.
+function killPortListeners() {
+  const ports = [SERVER_PORT, PROXY_PORT, CDP_PORT, 5173].map((port) => `-iTCP:${port}`);
+  const result = spawnSync("lsof", ["-t", "-sTCP:LISTEN", ...ports], { encoding: "utf8" });
+  for (const pid of new Set(result.stdout.split("\n").filter(Boolean).map(Number))) {
+    if (pid !== process.pid) {
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {
+        // Already gone.
+      }
+    }
+  }
+}
+
 function stopAll() {
   for (const child of children) {
     try {
@@ -51,9 +68,13 @@ function stopAll() {
       child.kill("SIGTERM");
     }
   }
+  killPortListeners();
 }
 process.on("exit", stopAll);
 process.on("SIGINT", () => process.exit(130));
+process.on("SIGTERM", () => process.exit(143));
+
+killPortListeners();
 
 try {
   // Each app version runs against its own server code.
